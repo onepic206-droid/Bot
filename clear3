@@ -7,11 +7,11 @@ Config = {
     },
 
     -- FITUR: Atur jumlah seed yang ingin di-drop di sini
-    DROP_AMOUNT = 100, 
+    DROP_AMOUNT = 80, 
 
     DelaySettings = {  
         DELAY_PLACE = 120,
-        DELAY_BREAK = 150  
+        DELAY_BREAK = 180  
     },  
 
     PLAT_ID = 102,
@@ -21,8 +21,7 @@ Config = {
 }
 
 -- Optimization Settings
-ChangeValue("[C] Anti Bounce", true)
-ChangeValue("[C] No render object", true)
+ChangeValue("[C] AntiBounce", true)
 ChangeValue("[C] No render shadow", true)
 ChangeValue("[C] No render name", true)
 ChangeValue("[C] No render particle", true)
@@ -45,6 +44,7 @@ local e = {
 local lastX, lastY = 0, 0
 local isPlayerMoving = true
 local isOfflineNotified = false
+local lastPacketTime = 0
 index_world = 1
 dpc = Config.DelaySettings.DELAY_PLACE
 dbk = Config.DelaySettings.DELAY_BREAK
@@ -118,12 +118,21 @@ function pos()
     return math.floor(GetLocal().pos.x / 32), math.floor(GetLocal().pos.y / 32)
 end
 
+-- FITUR BARU: Anti Spam Packet Raw
 function packet(t, v, x, y)
     checkConn()
+    
+    -- Memberi jarak minimal 50ms antar packet agar tidak dc/ban
+    local currentTime = os.clock() * 1000
+    if currentTime - lastPacketTime < 50 then
+        Sleep(50 - (currentTime - lastPacketTime))
+    end
+    
     SendPacketRaw(false, {
         type = t, value = v, px = x, py = y,
         x = GetLocal().pos.x, y = GetLocal().pos.y
     })
+    lastPacketTime = os.clock() * 1000
 end
 
 function log(x)
@@ -226,19 +235,22 @@ function OnWorld()
     return (type(n) == "table" and n.name) and n.name or "EXIT"
 end
 
+-- FITUR BARU: Warp delay 5 detik
 function warp(x, ignorePlayer)
     checkConn()
     local worldName = x:match("([^|]+)")
     if OnWorld():lower() == worldName:lower() then return true end
     
-    log("Warping to " .. x)
+    log("Warping to " .. x .. ". Waiting 5s...")
+    Sleep(5000) -- Warp delay 5 detik sesuai request
+    
     RequestJoinWorld(x)
     
     local timeout = 0
     repeat 
         Sleep(1000) 
         timeout = timeout + 1
-    until OnWorld():lower() == worldName:lower() or timeout > 10
+    until OnWorld():lower() == worldName:lower() or timeout > 12
 
     if not ignorePlayer then
         if #GetPlayerList() > 1 then
@@ -246,6 +258,7 @@ function warp(x, ignorePlayer)
             return false 
         end
     end
+    Sleep(2000) -- Stabilize after warp
     return true
 end
 
@@ -262,6 +275,7 @@ function findNearest(px, py)
     return nearest
 end
 
+-- FITUR BARU: Delay collect
 function collect(r)
     r = r or 2
     local px, py = pos()
@@ -269,6 +283,7 @@ function collect(r)
         local dx, dy = math.abs(math.floor(obj.pos.x / 32) - px), math.abs(math.floor(obj.pos.y / 32) - py)
         if dx <= r and dy <= r then
             packet(11, obj.oid, obj.pos.x + 6, 0)
+            Sleep(150) -- Delay collect agar lebih aman dari deteksi
         end
     end
 end
