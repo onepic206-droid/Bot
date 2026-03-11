@@ -1,4 +1,24 @@
+-- CONFIG
+Config = {
+    World = {
+        WHITELISTED_WORLD = {},
+        TAKE_PLATFORM_WORLD = "saveku000|b19",
+        STORAGE_X = 56,
+        STORAGE_Y = 20
+    },
 
+    DROP_AMOUNT = 100,
+
+    DelaySettings = {
+        DELAY_PLACE = 150,
+        DELAY_BREAK = 180
+    },
+
+    PLAT_ID = 102,
+
+    WEBHOOK_URL = "https://discord.com/api/webhooks/1479853594416124016/Da1c-O02WM5AenCTT5GaKihq6oevBXvhjN4Br_lWQhkO_ESm8BcGMNTIf3bxIiVZW6_P",
+    MESSAGE_ID = "1480803751697715292"
+}
 -- Optimization Settings
 ChangeValue("[C] AntiBounce", true)
 ChangeValue("[C] No render shadow", true)
