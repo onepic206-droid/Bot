@@ -1,24 +1,3 @@
-Config = {
-    World = {
-        WHITELISTED_WORLD = {"NPNZT","UVAQP","TKOIR","IKRCP","SMFLF","DNLMA","OMLBQ"}, -- daftar world farming
-        TAKE_PLATFORM_WORLD = "saveku000|b19",  -- world tempat ambil platform & storage
-        STORAGE_X = 56, -- Koordinat X untuk drop seed
-        STORAGE_Y = 20  -- Koordinat Y untuk drop seed
-    },
-
-    -- FITUR: Atur jumlah seed yang ingin di-drop di sini
-    DROP_AMOUNT = 80, 
-
-    DelaySettings = {  
-        DELAY_PLACE = 120,
-        DELAY_BREAK = 180  
-    },  
-
-    PLAT_ID = 102,
-    -- WEBHOOK CONFIG
-    WEBHOOK_URL = "https://discord.com/api/webhooks/1479853594416124016/Da1c-O02WM5AenCTT5GaKihq6oevBXvhjN4Br_lWQhkO_ESm8BcGMNTIf3bxIiVZW6_P",
-    MESSAGE_ID = "1480803751697715292" -- Pesan yang akan di-update secara real-time
-}
 
 -- Optimization Settings
 ChangeValue("[C] AntiBounce", true)
