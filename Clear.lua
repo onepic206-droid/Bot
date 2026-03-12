@@ -1,17 +1,17 @@
 Config = {
     World = {
-        WHITELISTED_WORLD = {"NPNZT","UVAQP","TKOIR","IKRCP","SMFLF","DNLMA","OMLBQ"}, -- daftar world farming
+        WHITELISTED_WORLD = {"VNCUZ","VZYMQ","PQUSE","UCKXH","YDCPP","IWQLN","OZHTJ","RSXUV","LDETJ","CNVEP","LQBVL","GXMUK","EBPEX","IGDDV","PZDQP","CKPZU","OGRKE","LJCTI"}, -- daftar world farming
         TAKE_PLATFORM_WORLD = "saveku000|b19",  -- world tempat ambil platform & storage
-        STORAGE_X = 56, -- Koordinat X untuk drop seed
+        STORAGE_X = 40, -- Koordinat X untuk drop seed
         STORAGE_Y = 20  -- Koordinat Y untuk drop seed
     },
 
     -- FITUR: Atur jumlah seed yang ingin di-drop di sini
-    DROP_AMOUNT = 100, 
+    DROP_AMOUNT = 80, 
 
     DelaySettings = {  
-        DELAY_PLACE = 120,
-        DELAY_BREAK = 150  
+        DELAY_PLACE = 150,
+        DELAY_BREAK = 200  
     },  
 
     PLAT_ID = 102,
@@ -21,7 +21,7 @@ Config = {
 }
 
 -- Optimization Settings
-ChangeValue("[C] AntiBounce", true)
+ChangeValue("[C] Antibounce", true)
 ChangeValue("[C] No render shadow", true)
 ChangeValue("[C] No render name", true)
 ChangeValue("[C] No render particle", true)
