@@ -6,7 +6,6 @@ Config = {
         STORAGE_Y = 20  -- Koordinat Y untuk drop seed
     },
 
-    -- FITUR: Atur jumlah seed yang ingin di-drop di sini
     DROP_AMOUNT = 80, 
 
     DelaySettings = {  
@@ -15,19 +14,16 @@ Config = {
     },  
 
     PLAT_ID = 102,
-    -- WEBHOOK CONFIG
     WEBHOOK_URL = "https://discord.com/api/webhooks/1479853594416124016/Da1c-O02WM5AenCTT5GaKihq6oevBXvhjN4Br_lWQhkO_ESm8BcGMNTIf3bxIiVZW6_P",
-    MESSAGE_ID = "1479953461448671425" -- Pesan yang akan di-update secara real-time
+    MESSAGE_ID = "1479953461448671425" 
 }
 
--- Optimization Settings
 ChangeValue("[C] Antibounce", true)
 ChangeValue("[C] No render shadow", true)
 ChangeValue("[C] No render name", true)
 ChangeValue("[C] No render particle", true)
 ChangeValue("[C] Modfly v2", true)
 
--- EMOJI CONFIG
 local e = {
     crown = "<:crown:1477099247777353908>",
     online = "<a:online:1477099070110568579>",
@@ -49,7 +45,7 @@ dpc = Config.DelaySettings.DELAY_PLACE
 dbk = Config.DelaySettings.DELAY_BREAK
 
 -- =========================================
--- REVISI: MOVE & BREAK SYSTEM (5-BLOCK & ANTI-RESIDU)
+-- UPDATE: 5-BLOCK & ANTI-RESIDU SYSTEM
 -- =========================================
 
 function moveAct(action, x, y, id, delay)
@@ -58,77 +54,38 @@ function moveAct(action, x, y, id, delay)
     local dly = delay or (action == "place" and dpc or dbk)
     
     if action == "hit" then
-        -- Anti-Residu: Loop sampai tile benar-benar kosong (FG dan BG)
         local limit = 0
+        -- Cek sampai tile benar-benar kosong untuk cegah sisa 1 block
         while (GetTile(x, y).fg ~= 0 or GetTile(x, y).bg ~= 0) and limit < 6 do
             packet(3, targetID, x, y)
             Sleep(dly)
             limit = limit + 1
         end
     else
-        -- Logic Place
         packet(3, targetID, x, y)
         Sleep(dly)
     end
 end
 
--- =========================================
--- REAL-TIME WEBHOOK SYSTEM
--- =========================================
-
 function sendWebhook(info_tambahan)
     local local_player = GetLocal()
     if not local_player then return end
-    
     local currentX = math.floor(local_player.pos.x / 32)
     local currentY = math.floor(local_player.pos.y / 32)
-    
-    if currentX == lastX and currentY == lastY then
-        isPlayerMoving = false
-    else
-        isPlayerMoving = true
-    end
+    if currentX == lastX and currentY == lastY then isPlayerMoving = false else isPlayerMoving = true end
     lastX, lastY = currentX, currentY
-
     local statusEmoji = isPlayerMoving and e.online or e.offline
     local statusText = isPlayerMoving and "ONLINE" or "OFFLINE (IDLE)"
     local color = isPlayerMoving and 3066993 or 15158332
     local gems = GetPlayerInfo() and GetPlayerInfo().gems or 0
-    
-    local content = string.format([[
-    {
-      "embeds": [
-        {
-          "title": "%s **RexV Auto Dirt Monitor**",
-          "description": "%s **Player:** %s",
-          "color": %d,
-          "fields": [
-            {"name": "Status", "value": "%s **%s**", "inline": true},
-            {"name": "%s Posisi", "value": "%d, %d", "inline": true},
-            {"name": "%s Gems", "value": "%d", "inline": true},
-            {"name": "%s World", "value": "%s", "inline": true},
-            {"name": "%s Info", "value": "%s", "inline": false}
-          ],
-          "footer": { "text": "Last Update: %s | Real-time Mode" }
-        }
-      ]
-    }
-    ]], e.crown, e.char, local_player.name, color, statusEmoji, statusText, e.arrow, currentX, currentY, e.wlds, gems, e.verif, OnWorld(), e.loading, info_tambahan, os.date("%H:%M:%S"))
-    
+    local content = string.format([[{"embeds": [{"title": "%s **RexV Auto Dirt Monitor**","description": "%s **Player:** %s","color": %d,"fields": [{"name": "Status", "value": "%s **%s**", "inline": true},{"name": "%s Posisi", "value": "%d, %d", "inline": true},{"name": "%s Gems", "value": "%d", "inline": true},{"name": "%s World", "value": "%s", "inline": true},{"name": "%s Info", "value": "%s", "inline": false}],"footer": { "text": "Last Update: %s | Real-time Mode" }}]}]], e.crown, e.char, local_player.name, color, statusEmoji, statusText, e.arrow, currentX, currentY, e.wlds, gems, e.verif, OnWorld(), e.loading, info_tambahan, os.date("%H:%M:%S"))
     local patch_url = Config.WEBHOOK_URL .. "/messages/" .. Config.MESSAGE_ID
     MakeRequest(patch_url, "PATCH", {["Content-Type"] = "application/json"}, content)
 end
 
--- =========================================
--- UTILITY & CONNECTION SYSTEM
--- =========================================
-
 function checkConn()
     if GetLocal() == nil or GetLocal().pos == nil then
-        if not isOfflineNotified then
-            LogToConsole("`4[RexV]`0 Connection Lost!")
-            isOfflineNotified = true
-        end
+        if not isOfflineNotified then LogToConsole("`4[RexV]`0 Connection Lost!") isOfflineNotified = true end
         while GetLocal() == nil or GetLocal().pos == nil do Sleep(5000) end
         isOfflineNotified = false
         sendWebhook("Reconnected")
@@ -143,13 +100,8 @@ end
 function packet(t, v, x, y)
     checkConn()
     local currentTime = os.clock() * 1000
-    if currentTime - lastPacketTime < 50 then
-        Sleep(50 - (currentTime - lastPacketTime))
-    end
-    SendPacketRaw(false, {
-        type = t, value = v, px = x, py = y,
-        x = GetLocal().pos.x, y = GetLocal().pos.y
-    })
+    if currentTime - lastPacketTime < 50 then Sleep(50 - (currentTime - lastPacketTime)) end
+    SendPacketRaw(false, {type = t, value = v, px = x, py = y, x = GetLocal().pos.x, y = GetLocal().pos.y})
     lastPacketTime = os.clock() * 1000
 end
 
@@ -157,10 +109,6 @@ function log(x)
     SendVariantList({[0] = "OnTextOverlay", [1] = "`2[ RexV Script ]`0 : " .. x})
     LogToConsole("`2[ RexV Script ]`0 : " .. x)
 end
-
--- =========================================
--- INVENTORY & STORAGE SYSTEM
--- =========================================
 
 function clearTrash()
     local trashItems = {11, 10, 2914, 5024, 5026, 5028, 5030, 5032, 5034, 5036, 5038, 5040, 5042, 5044}
@@ -188,10 +136,7 @@ function storeItems()
     local seeds = {3, 15}
     local triggerCount = 200
     local needsDrop = false
-    for _, id in ipairs(seeds) do
-        if GetItemCount(id) >= triggerCount then needsDrop = true break end
-    end
-
+    for _, id in ipairs(seeds) do if GetItemCount(id) >= triggerCount then needsDrop = true break end end
     if needsDrop then
         local lastWorld = OnWorld()
         local dropQty = Config.DROP_AMOUNT
@@ -238,10 +183,6 @@ function finalSweep()
     end
 end
 
--- =========================================
--- CORE LOGIC
--- =========================================
-
 function OnWorld()
     local n = GetWorld()
     return (type(n) == "table" and n.name) and n.name or "EXIT"
@@ -255,16 +196,8 @@ function warp(x, ignorePlayer)
     Sleep(5000)
     RequestJoinWorld(x)
     local timeout = 0
-    repeat 
-        Sleep(1000) 
-        timeout = timeout + 1
-    until OnWorld():lower() == worldName:lower() or timeout > 12
-    if not ignorePlayer then
-        if #GetPlayerList() > 1 then
-            log("World occupied! Skipping.")
-            return false 
-        end
-    end
+    repeat Sleep(1000) timeout = timeout + 1 until OnWorld():lower() == worldName:lower() or timeout > 12
+    if not ignorePlayer and #GetPlayerList() > 1 then log("World occupied! Skipping.") return false end
     Sleep(2000)
     return true
 end
@@ -274,9 +207,7 @@ function findNearest(px, py)
     for _, tile in pairs(GetTiles()) do
         if tile.fg == 4 then
             local dist = math.abs(tile.x - px) + math.abs(tile.y - py)
-            if dist < minDist then
-                nearest, minDist = tile, dist
-            end
+            if dist < minDist then nearest, minDist = tile, dist end
         end
     end
     return nearest
@@ -316,7 +247,6 @@ function pPlatform()
         if GetTile(1, py).fg == 0 then myPlatCount = myPlatCount + 1 end
         if GetTile(98, py).fg == 0 then myPlatCount = myPlatCount + 1 end
     end
-    
     if myPlatCount > 0 and GetItemCount(Config.PLAT_ID) < myPlatCount then
         warp(Config.World.TAKE_PLATFORM_WORLD, true) 
         while GetItemCount(Config.PLAT_ID) < myPlatCount do
@@ -329,7 +259,6 @@ function pPlatform()
         end
         warp(Config.World.WHITELISTED_WORLD[index_world], true)
     end
-
     for _, x in pairs({1, 98}) do
         for py = 2, 52, 2 do
             while GetTile(x, py).fg == 0 do
@@ -360,17 +289,21 @@ function farmAndPlace()
             Sleep(500)
         end
     end
-
+    -- Update Loop: Sekarang melompat per 5 block
     for y = 52, 2, -2 do
-        for x = 2, 97, 3 do
-            if x + 2 > 97 then break end
-            while GetTile(x, y).fg == 0 or GetTile(x+1, y).fg == 0 or GetTile(x+2, y).fg == 0 do
+        for x = 2, 97, 5 do
+            local needsFill = false
+            for i = 0, 4 do if x+i <= 97 and GetTile(x+i, y).fg == 0 then needsFill = true break end end
+            
+            while needsFill do
                 storeItems() 
                 farmSeeds()
-                FindPath(x+1, y-1, 400)
-                for i = 0, 2 do
-                    if GetTile(x+i, y).fg == 0 and GetItemCount(2) > 0 then
+                FindPath(x+2, y-1, 400) -- Berdiri di tengah range 5 block
+                needsFill = false
+                for i = 0, 4 do
+                    if x+i <= 97 and GetTile(x+i, y).fg == 0 and GetItemCount(2) > 0 then
                         moveAct("place", x+i, y, 2)
+                        if GetTile(x+i, y).fg == 0 then needsFill = true end
                     end
                 end
             end
@@ -382,37 +315,30 @@ end
 -- MAIN EXECUTION
 -- =========================================
 
-log("RexV Auto Dirt Started")
-
-RunThread(function()
-    while true do
-        sendWebhook("Sedang Berjalan...")
-        Sleep(10000)
-    end
-end)
+log("RexV Auto Dirt Started (5-Block Mode)")
+RunThread(function() while true do sendWebhook("Sedang Berjalan...") Sleep(10000) end end)
 
 while index_world <= #Config.World.WHITELISTED_WORLD do
     local currentWorld = Config.World.WHITELISTED_WORLD[index_world]
-    
     if warp(currentWorld, false) then
         sendWebhook("Membersihkan " .. currentWorld)
-        
         clearArea({{0, 1}, {98, 99}}, 24, 53)
         pPlatform()
 
+        -- Update Loop Membersihkan BG: Sekarang melompat per 5 block
         for y = 1, 54, 2 do
-            for x = 2, 97, 3 do
+            for x = 2, 97, 5 do
                 local nClear = false
-                for i = 0, 2 do if (GetTile(x+i, y).bg == 14 or GetTile(x+i, y).fg == 2) then nClear = true break end end
+                for i = 0, 4 do if x+i <= 97 and (GetTile(x+i, y).bg == 14 or GetTile(x+i, y).fg == 2) then nClear = true break end end
                 if nClear then
                     storeItems() 
-                    FindPath(x+1, y-2, 400)
+                    FindPath(x+2, y-2, 400) -- Berdiri di tengah range 5 block
                     while nClear do
                         nClear = false
-                        for i = 0, 2 do
-                            if (GetTile(x+i, y).bg == 14 or GetTile(x+i, y).fg == 2) then
+                        for i = 0, 4 do
+                            if x+i <= 97 and (GetTile(x+i, y).bg == 14 or GetTile(x+i, y).fg == 2) then
                                 moveAct("hit", x+i, y)
-                                nClear = true
+                                if GetTile(x+i, y).bg ~= 0 then nClear = true end
                             end
                         end
                         collect(3)
@@ -429,20 +355,17 @@ while index_world <= #Config.World.WHITELISTED_WORLD do
             storeItems() 
             FindPath(lava.x, lava.y - 1, 400)
             px, py = lava.x, lava.y
-            for dx = -2, 2 do -- 5 Block Horizontal
-                for dy = -2, 2 do -- 5 Block Vertical
-                    if GetTile(px+dx, py+dy).fg == 4 then 
-                        moveAct("hit", px+dx, py+dy) 
-                    end
+            -- Range Lava 5-block
+            for dx = -2, 2 do
+                for dy = -2, 2 do
+                    if GetTile(px+dx, py+dy).fg == 4 then moveAct("hit", px+dx, py+dy) end
                 end
             end
             collect(5)
             clearTrash()
         end
-
         farmAndPlace()
         finalSweep()
-        
         index_world = index_world + 1
     else
         index_world = index_world + 1
