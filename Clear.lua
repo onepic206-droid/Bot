@@ -1,12 +1,33 @@
+Config = {
+    World = {
+        WHITELISTED_WORLD = {"NPNZT","UVAQP","TKOIR","IKRCP","SMFLF","DNLMA","OMLBQ"}, -- daftar world farming
+        TAKE_PLATFORM_WORLD = "saveku000|b19",  -- world tempat ambil platform & storage
+        STORAGE_X = 56, -- Koordinat X untuk drop seed
+        STORAGE_Y = 20  -- Koordinat Y untuk drop seed
+    },
+
+    -- FITUR: Atur jumlah seed yang ingin di-drop di sini
+    DROP_AMOUNT = 100, 
+
+    DelaySettings = {  
+        DELAY_PLACE = 120,
+        DELAY_BREAK = 150  
+    },  
+
+    PLAT_ID = 102,
+    -- WEBHOOK CONFIG
+    WEBHOOK_URL = "https://discord.com/api/webhooks/1479853594416124016/Da1c-O02WM5AenCTT5GaKihq6oevBXvhjN4Br_lWQhkO_ESm8BcGMNTIf3bxIiVZW6_P",
+    MESSAGE_ID = "1479953461448671425" -- Pesan yang akan di-update secara real-time
+}
 
 -- Optimization Settings
-ChangeValue("[C] Antibounce", true)
+ChangeValue("[C] AntiBounce", true)
 ChangeValue("[C] No render shadow", true)
 ChangeValue("[C] No render name", true)
 ChangeValue("[C] No render particle", true)
 ChangeValue("[C] Modfly v2", true)
 
--- EMOJI CONFIG (Updated from Image IDs)
+-- EMOJI CONFIG
 local e = {
     crown = "<:crown:1477099247777353908>",
     online = "<a:online:1477099070110568579>",
@@ -19,7 +40,6 @@ local e = {
     char = "<:char_gt:1311762258329600030>"
 }
 
--- Variabel Status Real-time
 local lastX, lastY = 0, 0
 local isPlayerMoving = true
 local isOfflineNotified = false
@@ -29,14 +49,37 @@ dpc = Config.DelaySettings.DELAY_PLACE
 dbk = Config.DelaySettings.DELAY_BREAK
 
 -- =========================================
--- REAL-TIME WEBHOOK SYSTEM (PATCH METHOD)
+-- REVISI: MOVE & BREAK SYSTEM (5-BLOCK & ANTI-RESIDU)
+-- =========================================
+
+function moveAct(action, x, y, id, delay)
+    checkConn()
+    local targetID = id or 18
+    local dly = delay or (action == "place" and dpc or dbk)
+    
+    if action == "hit" then
+        -- Anti-Residu: Loop sampai tile benar-benar kosong (FG dan BG)
+        local limit = 0
+        while (GetTile(x, y).fg ~= 0 or GetTile(x, y).bg ~= 0) and limit < 6 do
+            packet(3, targetID, x, y)
+            Sleep(dly)
+            limit = limit + 1
+        end
+    else
+        -- Logic Place
+        packet(3, targetID, x, y)
+        Sleep(dly)
+    end
+end
+
+-- =========================================
+-- REAL-TIME WEBHOOK SYSTEM
 -- =========================================
 
 function sendWebhook(info_tambahan)
     local local_player = GetLocal()
     if not local_player then return end
     
-    -- Deteksi pergerakan untuk status online/offline
     local currentX = math.floor(local_player.pos.x / 32)
     local currentY = math.floor(local_player.pos.y / 32)
     
@@ -97,16 +140,12 @@ function pos()
     return math.floor(GetLocal().pos.x / 32), math.floor(GetLocal().pos.y / 32)
 end
 
--- FITUR BARU: Anti Spam Packet Raw
 function packet(t, v, x, y)
     checkConn()
-    
-    -- Memberi jarak minimal 50ms antar packet agar tidak dc/ban
     local currentTime = os.clock() * 1000
     if currentTime - lastPacketTime < 50 then
         Sleep(50 - (currentTime - lastPacketTime))
     end
-    
     SendPacketRaw(false, {
         type = t, value = v, px = x, py = y,
         x = GetLocal().pos.x, y = GetLocal().pos.y
@@ -156,16 +195,12 @@ function storeItems()
     if needsDrop then
         local lastWorld = OnWorld()
         local dropQty = Config.DROP_AMOUNT
-        
         log("Inventory Full! Drop ke storage...")
         sendWebhook("OTW Storage: Menjatuhkan " .. dropQty .. " seed")
-        
         warp(Config.World.TAKE_PLATFORM_WORLD, true) 
         Sleep(2000)
-        
         FindPath(Config.World.STORAGE_X, Config.World.STORAGE_Y, 400)
         Sleep(1000)
-
         for _, id in ipairs(seeds) do
             local currentCount = GetItemCount(id)
             if currentCount >= dropQty then
@@ -175,7 +210,6 @@ function storeItems()
                 Sleep(1000)
             end
         end
-        
         log("Kembali ke " .. lastWorld)
         warp(lastWorld, true)
         Sleep(2000)
@@ -192,7 +226,6 @@ function finalSweep()
             collect(3)
         end
     end
-
     local objects = GetObjectList()
     if #objects > 0 then
         for _, obj in pairs(objects) do
@@ -214,30 +247,25 @@ function OnWorld()
     return (type(n) == "table" and n.name) and n.name or "EXIT"
 end
 
--- FITUR BARU: Warp delay 5 detik
 function warp(x, ignorePlayer)
     checkConn()
     local worldName = x:match("([^|]+)")
     if OnWorld():lower() == worldName:lower() then return true end
-    
     log("Warping to " .. x .. ". Waiting 5s...")
-    Sleep(5000) -- Warp delay 5 detik sesuai request
-    
+    Sleep(5000)
     RequestJoinWorld(x)
-    
     local timeout = 0
     repeat 
         Sleep(1000) 
         timeout = timeout + 1
     until OnWorld():lower() == worldName:lower() or timeout > 12
-
     if not ignorePlayer then
         if #GetPlayerList() > 1 then
             log("World occupied! Skipping.")
             return false 
         end
     end
-    Sleep(2000) -- Stabilize after warp
+    Sleep(2000)
     return true
 end
 
@@ -254,7 +282,6 @@ function findNearest(px, py)
     return nearest
 end
 
--- FITUR BARU: Delay collect
 function collect(r)
     r = r or 2
     local px, py = pos()
@@ -262,26 +289,20 @@ function collect(r)
         local dx, dy = math.abs(math.floor(obj.pos.x / 32) - px), math.abs(math.floor(obj.pos.y / 32) - py)
         if dx <= r and dy <= r then
             packet(11, obj.oid, obj.pos.x + 6, 0)
-            Sleep(150) -- Delay collect agar lebih aman dari deteksi
+            Sleep(150)
         end
     end
-end
-
-function moveAct(action, x, y, id, delay)
-    checkConn()
-    packet(3, id or 18, x, y)
-    Sleep(delay or (action == "place" and dpc or dbk))
 end
 
 function clearArea(positions, yStart, yEnd)
     for _, pos_pair in pairs(positions) do
         for y = yStart, yEnd do
             for _, x in pairs(pos_pair) do
-                while GetTile(x, y).bg == 14 or GetTile(x, y).fg == 2 do
+                while GetTile(x, y).bg == 14 or GetTile(x, y).fg == 2 or GetTile(x, y).fg == 4 do
                     storeItems() 
                     FindPath(x <= 1 and 1 or 98, y - 1, 400)
                     moveAct("hit", x, y)
-                    if GetTile(x, y).bg == 0 then collect(2) end
+                    collect(3)
                     clearTrash()
                 end
             end
@@ -363,7 +384,6 @@ end
 
 log("RexV Auto Dirt Started")
 
--- Thread terpisah untuk Webhook agar update real-time setiap 10 detik
 RunThread(function()
     while true do
         sendWebhook("Sedang Berjalan...")
@@ -395,7 +415,7 @@ while index_world <= #Config.World.WHITELISTED_WORLD do
                                 nClear = true
                             end
                         end
-                        collect(2)
+                        collect(3)
                         clearTrash()
                     end
                 end
@@ -409,9 +429,11 @@ while index_world <= #Config.World.WHITELISTED_WORLD do
             storeItems() 
             FindPath(lava.x, lava.y - 1, 400)
             px, py = lava.x, lava.y
-            for dx = -1, 1 do
-                for dy = -1, 1 do
-                    if GetTile(px+dx, py+dy).fg == 4 then moveAct("hit", px+dx, py+dy) end
+            for dx = -2, 2 do -- 5 Block Horizontal
+                for dy = -2, 2 do -- 5 Block Vertical
+                    if GetTile(px+dx, py+dy).fg == 4 then 
+                        moveAct("hit", px+dx, py+dy) 
+                    end
                 end
             end
             collect(5)
