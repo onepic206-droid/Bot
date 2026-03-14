@@ -1,6 +1,6 @@
 Config = {
     World = {
-        WHITELISTED_WORLD = {"zhbsV","vujxB","vujxC","vujxG","vujxL","vujxM","vujxN","vujxP","vujxZ","sxfaB","sxfaJ","sxfaL","sxfaP","ptdeB","ptdeI","cykoE","cykoG","cykoR","cydzI","cydzL","cydzM","aqctC","aqcte","aqctH","aqctQ"},
+        WHITELISTED_WORLD = {"zhbsV","vujxB","vujxC","vujxG","vujxL","vujxM","vujxN","vujxP","vujxZ","sxfaB","sxfaJ","sxfaL","sxfaP","ptdeB","ptdeI","cykoE","cykoG","cykoR","cydzI","cydzL","cydzM","aqctC","aqcte","aqctH","aqctQ"}
         TAKE_PLATFORM_WORLD = "saveku000|b19",
         STORAGE_X = 38,
         STORAGE_Y = 19
@@ -12,8 +12,7 @@ Config = {
     },  
     PLAT_ID = 102,
     WEBHOOK_URL = "https://discord.com/api/webhooks/1479853594416124016/Da1c-O02WM5AenCTT5GaKihq6oevBXvhjN4Br_lWQhkO_ESm8BcGMNTIf3bxIiVZW6_P",
-    MESSAGE_ID = "1480803727492251719",
-    MAX_PING = 500,        
+    MESSAGE_ID = "1479953461448671425",
     RECONNECT_DELAY = 15,  
     USE_RANDOM_DELAY = true 
 }
@@ -35,7 +34,7 @@ local e = {
     warn = "<a:warningbro:1337084933507645523>",
     wlds = "<a:wlds:1351793663339921448>",
     char = "<:char_gt:1311762258329600030>",
-    lvl = "<:Level:1311762258329600030>" -- Emoji Level
+    lvl = "<:Level:1311762258329600030>"
 }
 
 local lastX, lastY = 0, 0
@@ -48,7 +47,7 @@ dpc = Config.DelaySettings.DELAY_PLACE
 dbk = Config.DelaySettings.DELAY_BREAK
 
 -- =========================================
--- SYSTEM REVISI: ANTI-BW, RECONNECT & WEBHOOK
+-- FIX: REMOVED GETPING TO PREVENT ERROR
 -- =========================================
 
 function markActivity()
@@ -66,10 +65,9 @@ function sendWebhook(info_tambahan)
     local local_player = GetLocal()
     local statusEmoji, statusText, color, name, worldName
     local currentX, currentY = 0, 0
-    local gems = 0
-    local level = 0
+    local gems, level = 0, 0
 
-    if not local_player then
+    if not local_player or not local_player.pos then
         statusEmoji = e.offline
         statusText = "DISCONNECTED / RECONNECTING"
         color = 15158332 
@@ -79,24 +77,17 @@ function sendWebhook(info_tambahan)
         currentX, currentY = math.floor(local_player.pos.x / 32), math.floor(local_player.pos.y / 32)
         local timeSinceLastAct = os.clock() - lastActivityTime
         local isStuck = timeSinceLastAct > 60
-        
         isPlayerMoving = (currentX ~= lastX or currentY ~= lastY)
         lastX, lastY = currentX, currentY
-        
         name = local_player.name
         local pInfo = GetPlayerInfo()
         gems = pInfo and pInfo.gems or 0
         level = pInfo and pInfo.level or 0
         worldName = OnWorld()
-
         if isPlayerMoving and not isStuck then
-            statusEmoji = e.online
-            statusText = "ONLINE"
-            color = 3066993 
+            statusEmoji = e.online statusText = "ONLINE" color = 3066993 
         else
-            statusEmoji = e.warn
-            statusText = "STUCK / IDLE"
-            color = 15158332 
+            statusEmoji = e.warn statusText = "STUCK / IDLE" color = 15158332 
         end
     end
     
@@ -105,16 +96,9 @@ function sendWebhook(info_tambahan)
 end
 
 function checkConn()
-    if GetLocal() ~= nil and GetPing() > Config.MAX_PING then
-        LogToConsole("`4[RexV]`0 High Ping ("..GetPing()..")! Disconnecting...")
-        sendWebhook("High Ping! Safe Disconnecting...")
-        Disconnect()
-        Sleep(Config.RECONNECT_DELAY * 1000)
-    end
-
+    -- REVISI: Menghapus GetPing() karena API tidak support
     if GetLocal() == nil or GetLocal().pos == nil then
         if not isOfflineNotified then
-            LogToConsole("`4[RexV]`0 Connection Lost! Menunggu Login...")
             sendWebhook("Connection Lost! Reconnecting...")
             isOfflineNotified = true
         end
@@ -122,7 +106,6 @@ function checkConn()
             Sleep(5000) 
         end
         isOfflineNotified = false
-        log("`2Reconnected!`0 Resuming...")
         sendWebhook("Reconnected! Resuming Task...")
         Sleep(3000)
     end
@@ -151,7 +134,7 @@ function log(x)
 end
 
 -- =========================================
--- LOGIC FARMING
+-- LOGIC FARMING (TETAP SAMA)
 -- =========================================
 
 function clearTrash()
