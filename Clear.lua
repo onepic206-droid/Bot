@@ -3,7 +3,7 @@ Config = {
         WHITELISTED_WORLD = {"zhbsV","vujxB","vujxC","vujxG","vujxL","vujxM","vujxN","vujxP","vujxZ","sxfaB","sxfaJ","sxfaL","sxfaP","ptdeB","ptdeI","cykoE","cykoG","cykoR","cydzI","cydzL","cydzM","aqctC","aqcte","aqctH","aqctQ"},
         TAKE_PLATFORM_WORLD = "saveku000|b19",
         STORAGE_X = 38,
-        STORAGE_Y = 20
+        STORAGE_Y = 19
     },
     DROP_AMOUNT = 80, 
     DelaySettings = {  
@@ -12,9 +12,9 @@ Config = {
     },  
     PLAT_ID = 102,
     WEBHOOK_URL = "https://discord.com/api/webhooks/1479853594416124016/Da1c-O02WM5AenCTT5GaKihq6oevBXvhjN4Br_lWQhkO_ESm8BcGMNTIf3bxIiVZW6_P",
-    MESSAGE_ID = "1480803739786022912",
-    MAX_PING = 500,
-    RECONNECT_DELAY = 15,
+    MESSAGE_ID = "1480803727492251719",
+    MAX_PING = 500,        
+    RECONNECT_DELAY = 15,  
     USE_RANDOM_DELAY = true 
 }
 
@@ -34,7 +34,8 @@ local e = {
     arrow = "<a:ARROW:1378507917564579982>",
     warn = "<a:warningbro:1337084933507645523>",
     wlds = "<a:wlds:1351793663339921448>",
-    char = "<:char_gt:1311762258329600030>"
+    char = "<:char_gt:1311762258329600030>",
+    lvl = "<:Level:1311762258329600030>" -- Emoji Level
 }
 
 local lastX, lastY = 0, 0
@@ -47,7 +48,7 @@ dpc = Config.DelaySettings.DELAY_PLACE
 dbk = Config.DelaySettings.DELAY_BREAK
 
 -- =========================================
--- SYSTEM REVISI: WEBHOOK DISCONNECT & RECONNECT
+-- SYSTEM REVISI: ANTI-BW, RECONNECT & WEBHOOK
 -- =========================================
 
 function markActivity()
@@ -63,19 +64,18 @@ end
 
 function sendWebhook(info_tambahan)
     local local_player = GetLocal()
-    local statusEmoji, statusText, color, name
+    local statusEmoji, statusText, color, name, worldName
     local currentX, currentY = 0, 0
     local gems = 0
-    local worldName = OnWorld()
+    local level = 0
 
     if not local_player then
-        -- Jika Player Offline
         statusEmoji = e.offline
         statusText = "DISCONNECTED / RECONNECTING"
-        color = 15158332 -- Merah
+        color = 15158332 
         name = "Unknown (Offline)"
+        worldName = "EXIT"
     else
-        -- Jika Player Online
         currentX, currentY = math.floor(local_player.pos.x / 32), math.floor(local_player.pos.y / 32)
         local timeSinceLastAct = os.clock() - lastActivityTime
         local isStuck = timeSinceLastAct > 60
@@ -84,33 +84,37 @@ function sendWebhook(info_tambahan)
         lastX, lastY = currentX, currentY
         
         name = local_player.name
-        gems = GetPlayerInfo() and GetPlayerInfo().gems or 0
+        local pInfo = GetPlayerInfo()
+        gems = pInfo and pInfo.gems or 0
+        level = pInfo and pInfo.level or 0
+        worldName = OnWorld()
 
         if isPlayerMoving and not isStuck then
             statusEmoji = e.online
             statusText = "ONLINE"
-            color = 3066993 -- Hijau
+            color = 3066993 
         else
             statusEmoji = e.warn
             statusText = "STUCK / IDLE"
-            color = 15158332 -- Merah/Orange
+            color = 15158332 
         end
     end
     
-    local content = string.format([[{"embeds": [{"title": "%s **RexV Monitor**","description": "%s **Player:** %s","color": %d,"fields": [{"name": "Status", "value": "%s **%s**", "inline": true},{"name": "%s Posisi", "value": "%d, %d", "inline": true},{"name": "%s Gems", "value": "%d", "inline": true},{"name": "%s World", "value": "%s", "inline": true},{"name": "%s Info", "value": "%s", "inline": false}],"footer": { "text": "Last Update: %s" }}]}]], e.crown, e.char, name, color, statusEmoji, statusText, e.arrow, currentX, currentY, e.wlds, gems, e.verif, worldName, e.loading, info_tambahan, os.date("%H:%M:%S"))
+    local content = string.format([[{"embeds": [{"title": "%s **RexV Monitor**","description": "%s **Player:** %s","color": %d,"fields": [{"name": "Status", "value": "%s **%s**", "inline": true},{"name": "%s Posisi", "value": "%d, %d", "inline": true},{"name": "%s Level", "value": "**%d**", "inline": true},{"name": "%s Gems", "value": "%d", "inline": true},{"name": "%s World", "value": "%s", "inline": true},{"name": "%s Info", "value": "%s", "inline": false}],"footer": { "text": "Last Update: %s | Auto-Resume Active" }}]}]], e.crown, e.char, name, color, statusEmoji, statusText, e.arrow, currentX, currentY, e.lvl, level, e.wlds, gems, e.verif, worldName, e.loading, info_tambahan, os.date("%H:%M:%S"))
     MakeRequest(Config.WEBHOOK_URL .. "/messages/" .. Config.MESSAGE_ID, "PATCH", {["Content-Type"] = "application/json"}, content)
 end
 
 function checkConn()
     if GetLocal() ~= nil and GetPing() > Config.MAX_PING then
-        sendWebhook("High Ping! Disconnecting...")
+        LogToConsole("`4[RexV]`0 High Ping ("..GetPing()..")! Disconnecting...")
+        sendWebhook("High Ping! Safe Disconnecting...")
         Disconnect()
         Sleep(Config.RECONNECT_DELAY * 1000)
     end
 
     if GetLocal() == nil or GetLocal().pos == nil then
         if not isOfflineNotified then
-            LogToConsole("`4[RexV]`0 Connection Lost! Menunggu login...")
+            LogToConsole("`4[RexV]`0 Connection Lost! Menunggu Login...")
             sendWebhook("Connection Lost! Reconnecting...")
             isOfflineNotified = true
         end
@@ -118,15 +122,11 @@ function checkConn()
             Sleep(5000) 
         end
         isOfflineNotified = false
-        log("`2Reconnected!`0")
-        sendWebhook("Reconnected! Resuming...")
+        log("`2Reconnected!`0 Resuming...")
+        sendWebhook("Reconnected! Resuming Task...")
         Sleep(3000)
     end
 end
-
--- =========================================
--- LOGIC DASAR & FARMING
--- =========================================
 
 function OnWorld()
     local n = GetWorld()
@@ -139,7 +139,7 @@ function pos() checkConn() return math.floor(GetLocal().pos.x / 32), math.floor(
 function packet(t, v, x, y)
     checkConn()
     local currentTime = os.clock() * 1000
-    local jitter = math.random(0, 25)
+    local jitter = math.random(0, 30)
     if currentTime - lastPacketTime < (50 + jitter) then Sleep((50 + jitter) - (currentTime - lastPacketTime)) end
     SendPacketRaw(false, {type = t, value = v, px = x, py = y, x = GetLocal().pos.x, y = GetLocal().pos.y})
     lastPacketTime = os.clock() * 1000
@@ -149,6 +149,10 @@ function log(x)
     SendVariantList({[0] = "OnTextOverlay", [1] = "`2[ RexV Script ]`0 : " .. x})
     LogToConsole("`2[ RexV Script ]`0 : " .. x)
 end
+
+-- =========================================
+-- LOGIC FARMING
+-- =========================================
 
 function clearTrash()
     local trashItems = {11, 10, 2914, 5024, 5026, 5028, 5030, 5032, 5034, 5036, 5038, 5040, 5042, 5044}
@@ -247,8 +251,8 @@ function moveAct(action, x, y, id, delay)
     checkConn() 
     packet(3, id or 18, x, y)
     markActivity()
-    local baseDelay = delay or (action == "place" and dpc or dbk)
-    Sleep(getSmartDelay(baseDelay))
+    local finalDelay = delay or (action == "place" and dpc or dbk)
+    Sleep(getSmartDelay(finalDelay))
 end
 
 function clearArea(positions, yStart, yEnd)
@@ -331,7 +335,7 @@ end
 -- =========================================
 
 log("RexV Final Revision Started")
-RunThread(function() while true do sendWebhook("Bot is Working...") Sleep(10000) end end)
+RunThread(function() while true do sendWebhook("Bot is Farming...") Sleep(10000) end end)
 
 while true do
     checkConn()
