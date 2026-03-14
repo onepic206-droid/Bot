@@ -1,18 +1,18 @@
 Config = {
     World = {
-        WHITELISTED_WORLD = {"VNCUZ","VZYMQ","UCKXH","YDCPP","IWQLN","OZHTJ","RSXUV","LDETJ","CNVEP","LQBVL","GXMUK","EBPEX","IGDDV","PZDQP","CKPZU","OGRKE","LJCTI"},
+        WHITELISTED_WORLD = {"vujxP","vujxZ","sxfaB","sxfaJ","sxfaL","sxfaP","ptdeB","ptdeI","cykoE","cykoG","cykoR","cydzI","cydzL","cydzM","aqctC","aqcte","aqctH","aqctQ"},
         TAKE_PLATFORM_WORLD = "saveku000|b19",
-        STORAGE_X = 40,
-        STORAGE_Y = 20
+        STORAGE_X = 38,
+        STORAGE_Y = 19
     },
-    DROP_AMOUNT = 100, 
+    DROP_AMOUNT = 80, 
     DelaySettings = {  
-        DELAY_PLACE = 200,
-        DELAY_BREAK = 200  
+        DELAY_PLACE = 120,
+        DELAY_BREAK = 150  
     },  
     PLAT_ID = 102,
     WEBHOOK_URL = "https://discord.com/api/webhooks/1479853594416124016/Da1c-O02WM5AenCTT5GaKihq6oevBXvhjN4Br_lWQhkO_ESm8BcGMNTIf3bxIiVZW6_P",
-    MESSAGE_ID = "1479953461448671425"
+    MESSAGE_ID = "1480803739786022912"
 }
 
 -- Optimization Settings
@@ -38,24 +38,31 @@ local lastX, lastY = 0, 0
 local isPlayerMoving = true
 local isOfflineNotified = false
 local lastPacketTime = 0
+local lastActivityTime = os.clock()
 index_world = 1
 dpc = Config.DelaySettings.DELAY_PLACE
 dbk = Config.DelaySettings.DELAY_BREAK
 
 -- =========================================
--- REVISI SYSTEM: AUTO RECONNECT & RUN
+-- SYSTEM REVISI: ANTI-STUCK & RECONNECT
 -- =========================================
+
+function markActivity()
+    lastActivityTime = os.clock()
+end
 
 function checkConn()
     if GetLocal() == nil or GetLocal().pos == nil then
         if not isOfflineNotified then
-            LogToConsole("`4[RexV]`0 Connection Lost! Menunggu login kembali...")
+            LogToConsole("`4[RexV]`0 Connection Lost! Waiting for login...")
             isOfflineNotified = true
         end
-        while GetLocal() == nil or GetLocal().pos == nil do Sleep(5000) end
+        while GetLocal() == nil or GetLocal().pos == nil do 
+            Sleep(5000) 
+        end
         isOfflineNotified = false
-        log("Reconnected! Melanjutkan script...")
-        Sleep(2000)
+        log("Reconnected! Resuming tasks...")
+        Sleep(3000)
     end
 end
 
@@ -69,13 +76,19 @@ function sendWebhook(info_tambahan)
     local local_player = GetLocal()
     if not local_player then return end
     local currentX, currentY = math.floor(local_player.pos.x / 32), math.floor(local_player.pos.y / 32)
+    
+    local timeSinceLastAct = os.clock() - lastActivityTime
+    local isStuck = timeSinceLastAct > 60
+    
     isPlayerMoving = (currentX ~= lastX or currentY ~= lastY)
     lastX, lastY = currentX, currentY
-    local statusEmoji = isPlayerMoving and e.online or e.offline
-    local statusText = isPlayerMoving and "ONLINE" or "OFFLINE (IDLE)"
-    local color = isPlayerMoving and 3066993 or 15158332
+    
+    local statusEmoji = (isPlayerMoving and not isStuck) and e.online or e.warn
+    local statusText = (isPlayerMoving and not isStuck) and "ONLINE" or "OFFLINE / STUCK"
+    local color = (isPlayerMoving and not isStuck) and 3066993 or 15158332
+    
     local gems = GetPlayerInfo() and GetPlayerInfo().gems or 0
-    local content = string.format([[{"embeds": [{"title": "%s **RexV Monitor**","description": "%s **Player:** %s","color": %d,"fields": [{"name": "Status", "value": "%s **%s**", "inline": true},{"name": "%s Posisi", "value": "%d, %d", "inline": true},{"name": "%s Gems", "value": "%d", "inline": true},{"name": "%s World", "value": "%s", "inline": true},{"name": "%s Info", "value": "%s", "inline": false}],"footer": { "text": "Last Update: %s | Auto-Resume Active" }}]}]], e.crown, e.char, local_player.name, color, statusEmoji, statusText, e.arrow, currentX, currentY, e.wlds, gems, e.verif, OnWorld(), e.loading, info_tambahan, os.date("%H:%M:%S"))
+    local content = string.format([[{"embeds": [{"title": "%s **RexV Monitor**","description": "%s **Player:** %s","color": %d,"fields": [{"name": "Status", "value": "%s **%s**", "inline": true},{"name": "%s Posisi", "value": "%d, %d", "inline": true},{"name": "%s Gems", "value": "%d", "inline": true},{"name": "%s World", "value": "%s", "inline": true},{"name": "%s Info", "value": "%s\n*Idle: %.0fs*", "inline": false}],"footer": { "text": "Last Update: %s | Auto-Resume Active" }}]}]], e.crown, e.char, local_player.name, color, statusEmoji, statusText, e.arrow, currentX, currentY, e.wlds, gems, e.verif, OnWorld(), e.loading, info_tambahan, timeSinceLastAct, os.date("%H:%M:%S"))
     MakeRequest(Config.WEBHOOK_URL .. "/messages/" .. Config.MESSAGE_ID, "PATCH", {["Content-Type"] = "application/json"}, content)
 end
 
@@ -95,7 +108,7 @@ function log(x)
 end
 
 -- =========================================
--- LOGIC FARMING (TIDAK BERUBAH)
+-- LOGIC FARMING
 -- =========================================
 
 function clearTrash()
@@ -123,11 +136,28 @@ function storeItems()
     if needsDrop then
         local lastWorld = OnWorld()
         warp(Config.World.TAKE_PLATFORM_WORLD, true) Sleep(2000)
-        FindPath(Config.World.STORAGE_X, Config.World.STORAGE_Y, 400) Sleep(1000)
+        
+        local dropX, dropY = Config.World.STORAGE_X, Config.World.STORAGE_Y
+        FindPath(dropX, dropY, 400) Sleep(1000)
+        
         for _, id in ipairs(seeds) do
             if GetItemCount(id) >= Config.DROP_AMOUNT then
+                local isTileFull = false
+                for _, obj in pairs(GetObjectList()) do
+                    if math.floor(obj.pos.x / 32) == dropX and math.floor(obj.pos.y / 32) == dropY then
+                        isTileFull = true break
+                    end
+                end
+                
+                if isTileFull then
+                    log("Tile penuh, mundur ke X-1")
+                    dropX = dropX - 1
+                    FindPath(dropX, dropY, 400) Sleep(500)
+                end
+
                 SendPacket(2, "action|drop\nitemID|" .. id) Sleep(500)
                 SendPacket(2, "action|dialog_return\ndialog_name|drop_item\nitemID|" .. id .. "|\ncount|" .. Config.DROP_AMOUNT) Sleep(1000)
+                markActivity()
             end
         end
         warp(lastWorld, true) Sleep(2000)
@@ -148,6 +178,7 @@ end
 
 function warp(x, ignorePlayer)
     checkConn()
+    markActivity()
     local worldName = x:match("([^|]+)"):upper()
     if OnWorld() == worldName then return true end
     log("Warping to " .. x) Sleep(5000)
@@ -173,23 +204,38 @@ function collect(r)
     r = r or 2 local px, py = pos()
     for _, obj in pairs(GetObjectList()) do
         local dx, dy = math.abs(math.floor(obj.pos.x / 32) - px), math.abs(math.floor(obj.pos.y / 32) - py)
-        if dx <= r and dy <= r then packet(11, obj.oid, obj.pos.x + 6, 0) Sleep(150) end
+        if dx <= r and dy <= r then 
+            packet(11, obj.oid, obj.pos.x + 6, 0) 
+            markActivity()
+            Sleep(150) 
+        end
     end
 end
 
+-- =========================================
+-- REVISI: RANDOM DELAY (ANTI-BW METHODS)
+-- =========================================
 function moveAct(action, x, y, id, delay)
-    checkConn() packet(3, id or 18, x, y)
-    Sleep(delay or (action == "place" and dpc or dbk))
+    checkConn() 
+    packet(3, id or 18, x, y)
+    markActivity()
+    
+    -- Tambahan Variasi Delay agar tidak terdeteksi (Anti-BW)
+    local baseDelay = delay or (action == "place" and dpc or dbk)
+    local variation = math.random(-15, 25) -- Menambah/mengurangi delay secara acak
+    Sleep(baseDelay + variation)
 end
 
 function clearArea(positions, yStart, yEnd)
     for _, pos_pair in pairs(positions) do
         for y = yStart, yEnd do
             for _, x in pairs(pos_pair) do
+                checkConn()
                 while GetTile(x, y).bg == 14 or GetTile(x, y).fg == 2 do
                     storeItems() FindPath(x <= 1 and 1 or 98, y - 1, 400) moveAct("hit", x, y)
                     if GetTile(x, y).bg == 0 then collect(2) end
                     clearTrash()
+                    checkConn()
                 end
             end
         end
@@ -205,6 +251,7 @@ function pPlatform()
     if myPlatCount > 0 and GetItemCount(Config.PLAT_ID) < myPlatCount then
         warp(Config.World.TAKE_PLATFORM_WORLD, true) 
         while GetItemCount(Config.PLAT_ID) < myPlatCount do
+            checkConn()
             local item = nil
             for _, v in pairs(GetObjectList()) do if v.id == Config.PLAT_ID then item = v break end end
             if not item then break end
@@ -214,7 +261,10 @@ function pPlatform()
     end
     for _, x in pairs({1, 98}) do
         for py = 2, 52, 2 do
-            while GetTile(x, py).fg == 0 do FindPath(x, py - 1, 400) moveAct("place", x, py, Config.PLAT_ID) end
+            while GetTile(x, py).fg == 0 do 
+                checkConn()
+                FindPath(x, py - 1, 400) moveAct("place", x, py, Config.PLAT_ID) 
+            end
         end
     end
 end
@@ -223,8 +273,10 @@ function farmAndPlace()
     local plantY = 23
     local function farmSeeds()
         while GetItemCount(2) == 0 do
+            checkConn()
             storeItems() 
             for x = 2, 22 do
+                checkConn()
                 if GetItemCount(2) > 180 then break end
                 local tile = GetTile(x, plantY)
                 if tile.fg == 3 and tile.extra and tile.extra.progress >= 1 then
@@ -238,8 +290,10 @@ function farmAndPlace()
     end
     for y = 52, 2, -2 do
         for x = 2, 97, 3 do
+            checkConn()
             if x + 2 > 97 then break end
             while GetTile(x, y).fg == 0 or GetTile(x+1, y).fg == 0 or GetTile(x+2, y).fg == 0 do
+                checkConn()
                 storeItems() farmSeeds() FindPath(x+1, y-1, 400)
                 for i = 0, 2 do if GetTile(x+i, y).fg == 0 and GetItemCount(2) > 0 then moveAct("place", x+i, y, 2) end end
             end
@@ -248,58 +302,77 @@ function farmAndPlace()
 end
 
 -- =========================================
--- MAIN EXECUTION (AUTO-RUN REVISI)
+-- MAIN EXECUTION: FULL AUTO RUN
 -- =========================================
 
-log("RexV Started")
-RunThread(function() while true do if GetLocal() then sendWebhook("Running...") end Sleep(10000) end end)
+log("RexV Final Revision Started")
+-- Thread untuk Webhook & Anti-Stuck Check
+RunThread(function() 
+    while true do 
+        if GetLocal() then 
+            sendWebhook("Running Task...") 
+            -- Jika idle > 90 detik, coba gerak sedikit (Anti-Stuck)
+            if (os.clock() - lastActivityTime) > 90 then
+                log("Anti-Stuck: Mencoba melompat...")
+                packet(3, 18, pos())
+                Sleep(1000)
+            end
+        end 
+        Sleep(10000) 
+    end 
+end)
 
-while index_world <= #Config.World.WHITELISTED_WORLD do
+while true do
     checkConn()
-    local currentWorld = Config.World.WHITELISTED_WORLD[index_world]
-    
-    -- REVISI: Cek apakah bot sudah di world tujuan (setelah reconnect)
-    if OnWorld() == currentWorld:upper() or warp(currentWorld, false) then
-        sendWebhook("Cleaning " .. OnWorld())
-        
-        clearArea({{0, 1}, {98, 99}}, 24, 53)
-        pPlatform()
+    if index_world <= #Config.World.WHITELISTED_WORLD then
+        local currentWorld = Config.World.WHITELISTED_WORLD[index_world]
+        if OnWorld() == currentWorld:upper() or warp(currentWorld, false) then
+            sendWebhook("Working on " .. OnWorld())
+            clearArea({{0, 1}, {98, 99}}, 24, 53)
+            pPlatform()
 
-        for y = 1, 54, 2 do
-            for x = 2, 97, 3 do
-                checkConn()
-                local nClear = false
-                for i = 0, 2 do if (GetTile(x+i, y).bg == 14 or GetTile(x+i, y).fg == 2) then nClear = true break end end
-                if nClear then
-                    storeItems() FindPath(x+1, y-2, 400)
-                    while nClear do
-                        checkConn() nClear = false
-                        for i = 0, 2 do
-                            if (GetTile(x+i, y).bg == 14 or GetTile(x+i, y).fg == 2) then moveAct("hit", x+i, y) nClear = true end
+            for y = 1, 54, 2 do
+                for x = 2, 97, 3 do
+                    checkConn()
+                    local nClear = false
+                    for i = 0, 2 do if (GetTile(x+i, y).bg == 14 or GetTile(x+i, y).fg == 2) then nClear = true break end end
+                    if nClear then
+                        storeItems() FindPath(x+1, y-2, 400)
+                        while nClear do
+                            checkConn() nClear = false
+                            for i = 0, 2 do
+                                if (GetTile(x+i, y).bg == 14 or GetTile(x+i, y).fg == 2) then moveAct("hit", x+i, y) nClear = true end
+                            end
+                            collect(2) clearTrash()
                         end
-                        collect(2) clearTrash()
                     end
                 end
             end
-        end
 
-        local px, py = pos()
-        while true do
-            checkConn() local lava = findNearest(px, py)
-            if not lava then break end
-            storeItems() FindPath(lava.x, lava.y - 1, 400)
-            px, py = lava.x, lava.y
-            for dx = -1, 1 do for dy = -1, 1 do if GetTile(px+dx, py+dy).fg == 4 then moveAct("hit", px+dx, py+dy) end end end
-            collect(5) clearTrash()
-        end
+            local px, py = pos()
+            while true do
+                checkConn() 
+                local lava = findNearest(px, py)
+                if not lava then break end
+                storeItems() FindPath(lava.x, lava.y - 1, 400)
+                px, py = lava.x, lava.y
+                for dx = -1, 1 do for dy = -1, 1 do if GetTile(px+dx, py+dy).fg == 4 then moveAct("hit", px+dx, py+dy) end end end
+                collect(5) clearTrash()
+            end
 
-        farmAndPlace() finalSweep()
-        index_world = index_world + 1
+            farmAndPlace() 
+            finalSweep()
+            
+            log("Selesai world: " .. currentWorld)
+            index_world = index_world + 1
+        else
+            log("Gagal masuk world atau penuh, skip...")
+            index_world = index_world + 1
+        end
     else
-        index_world = index_world + 1
+        log("Semua world di list sudah selesai!")
+        sendWebhook("All Worlds Completed!")
+        break 
     end
-    Sleep(2000)
+    Sleep(3000)
 end
-
-log("Done!")
-sendWebhook("All Worlds Done!")
