@@ -3,10 +3,10 @@ local seedA = 169
 local seedB = 107
 local delay = 150
 local stepDelay = 200
-local MAX_PING = 500 -- Bot diam jika ping di atas ini
+local MAX_PING = 500 
 
-local WORLDFARM = "WFJEW|b18"   -- isi nama world farm (UPPERCASE)
-local WORLDTAKE = "savekubreak|abangku1"   -- isi nama world take (UPPERCASE)
+local WORLDFARM = "WFJEW|b18"   
+local WORLDTAKE = "SAVEKUBREAK|ABANGKU1" -- Pastikan Uppercase
 --===============================
 
 -- ===============================
@@ -29,7 +29,7 @@ function waitPlaced(x, y)
     return false
 end
 
--- Fitur pengecekan world penuh (Sesuai request Anda)
+-- Fitur pengecekan world penuh
 function isSpliced()
     local w = GetWorld()
     if not w then return false end
@@ -37,25 +37,29 @@ function isSpliced()
         for x = 0, w.width - 1 do
             local t = GetTile(x, y)
             local b = GetTile(x, y + 1)
-            -- Jika ada tile kosong (0) di atas blok padat (ID Genap)
+            -- Cek lahan kosong di atas blok padat (ID Genap & bukan Bedrock/6)
             if t and t.fg == 0 and b and b.fg ~= 0 and b.fg % 2 == 0 and b.fg ~= 6 then
-                return false -- Masih ada lahan kosong
+                return false 
             end
         end
     end
-    return true -- World sudah penuh total
+    return true 
 end
 
--- Fitur menjaga bot saat koneksi buruk
+-- ===============================
+-- PING GUARD (NEW VERSION)
+-- ===============================
 function pingGuard()
-    while GetPing() > MAX_PING do
-        LogToConsole("Ping Tinggi: " .. GetPing() .. "ms. Menunggu stabil...")
+    local currentPing = GetClient().ping
+    while currentPing > MAX_PING do
+        LogToConsole("Ping Tinggi: " .. currentPing .. " ms. Menunggu stabil...")
         Sleep(2000)
+        currentPing = GetClient().ping -- Update nilai ping di dalam loop
     end
 end
 
 -- ===============================
--- JOIN WORLD (BOTHEX)
+-- JOIN WORLD
 -- ===============================
 function joinWorld(name)
     LogToConsole("Joining: "..name)
@@ -107,64 +111,38 @@ function autoTake()
 end
 
 -- ===============================
--- SAPU BERSIH (CLEAN UP)
--- ===============================
-function spliceLeftover()
-    local w = GetWorld()
-    for y = 0, w.height - 1 do
-        for x = 0, w.width - 1 do
-            local t = GetTile(x, y)
-            if t and (t.fg == seedA or t.fg == seedB) then
-                if CheckPath(x, y) then
-                    FindPath(x, y)
-                    Sleep(stepDelay)
-                    local target = (t.fg == seedA) and seedB or seedA
-                    if inv(target) > 0 then
-                        SetItemSelected(target)
-                        SendPacketRaw(false, {
-                            type = 3, value = target, int_x = x, int_y = y,
-                            pos_x = GetLocal().pos.x, pos_y = GetLocal().pos.y
-                        })
-                        Sleep(delay)
-                    end
-                end
-            end
-        end
-    end
-end
-
--- ===============================
 -- MAIN SPLICE LOOP
 -- ===============================
 function startSplice()
-    joinWorld(WORLDFARM)
+    if not GetWorld() or GetWorld().name:upper() ~= WORLDFARM:upper() then
+        joinWorld(WORLDFARM)
+    end
 
     while true do
-        pingGuard() -- Cek stabilitas
+        pingGuard() -- Cek stabilitas menggunakan GetClient().ping
         
-        -- Jika world sudah penuh berdasarkan scan isSpliced, bot berhenti
         if isSpliced() then
             LogToConsole("Scan World: SUDAH PENUH.")
             break
         end
 
-        -- Bersihkan sisa-sisa yang tertinggal (lag tadi)
-        spliceLeftover()
-
         local w = GetWorld()
         local plantedThisCycle = false
 
         for y = 0, w.height - 1 do
+            -- Snake Movement Pattern
             local startX, endX, step = 0, w.width - 1, 1
             if y % 2 == 1 then startX, endX, step = w.width - 1, 0, -1 end
 
             for x = startX, endX, step do
+                pingGuard() -- Cek ping di tiap tile agar tidak skip saat lag mendadak
+
                 if inv(seedA) == 0 or inv(seedB) == 0 then autoTake() end
 
                 local t = GetTile(x, y)
                 local b = GetTile(x, y + 1)
 
-                -- Syarat Splice
+                -- Syarat Splice: Atas kosong, Bawah ada blok
                 if t and t.fg == 0 and b and b.fg ~= 0 and b.fg ~= 6 then
                     plantedThisCycle = true
                     if CheckPath(x, y) then
@@ -179,10 +157,9 @@ function startSplice()
                             pos_x = me.pos.x, pos_y = me.pos.y
                         })
 
-                        -- Verifikasi penanaman sebelum lanjut SEED B
                         if waitPlaced(x, y) then
                             Sleep(delay)
-                            -- Tanam SEED B
+                            -- Tanam SEED B (Splicing)
                             SetItemSelected(seedB)
                             SendPacketRaw(false,{
                                 type = 3, value = seedB, int_x = x, int_y = y,
