@@ -1,12 +1,12 @@
 --=========== CONFIG ===========
 local seedA = 107
 local seedB = 169
-local delay = 200 
+local delay = 200 -- Delay antar place agar animasi terlihat jelas
 local RANGE = 2
 local stepDelay = 200
 
 local worldTake = "Savekubreak|abangku1"
-local worldFarm = "WFJEW|b18"
+local worldFarm = "vvcrl|b18"
 --===============================
 
 local lastPingLog = 0
@@ -15,32 +15,22 @@ local pingLogDelay = 4000
 -- ===== INVENTORY =====
 function inv(id)
     for _, item in pairs(GetInventory()) do
-        if item.id == id then
-            return item.amount
-        end
+        if item.id == id then return item.amount end
     end
     return 0
 end
 
 -- ===== POSISI TILE PLAYER =====
 function getPosTile()
-    return math.floor(GetLocal().pos.x/32),
-           math.floor(GetLocal().pos.y/32)
+    return math.floor(GetLocal().pos.x/32), math.floor(GetLocal().pos.y/32)
 end
 
 -- ===== PING CHECK =====
 function waitPing()
     while true do
         local ping = GetClient().ping
-        local now = os.clock()*1000
-        if now - lastPingLog > pingLogDelay then
-            LogToConsole("Ping: "..ping.." ms")
-            lastPingLog = now
-        end
-        if ping <= 500 then
-            break
-        end
-        LogToConsole("Ping tinggi, pause splice...")
+        if ping <= 500 then break end
+        LogToConsole("Ping tinggi ("..ping.."ms), delay...")
         Sleep(1000)
     end
 end
@@ -53,30 +43,32 @@ function warp(world)
     end
 end
 
--- ===== RANGE CHECK =====
-function inRange(px,py,x,y)
-    return math.abs(px-x) <= RANGE and math.abs(py-y) <= RANGE
-end
-
--- ===== CEK TILE SUDAH KE-PLACE =====
-function waitPlaced(x,y)
-    for i = 1,10 do
-        local t = GetTile(x,y)
-        if t and t.fg ~= 0 then
-            return true
-        end
-        Sleep(120)
+-- ===== ARAH HADAP (FACING) =====
+function faceTile(x)
+    local px = math.floor(GetLocal().pos.x / 32)
+    local flag = 0
+    if x < px then
+        flag = 48 -- Hadap Kiri
+    else
+        flag = 32 -- Hadap Kanan
     end
-    return false
+    
+    SendPacketRaw(false, {
+        type = 0,
+        state = 0,
+        x = GetLocal().pos.x,
+        y = GetLocal().pos.y,
+        flags = flag
+    })
 end
 
--- ===== ANIMASI REVISI (BIAR GAK BLING) =====
-function spliceAnim(x,y,id)
+-- ===== ANIMASI PERSIS VIDEO =====
+function spliceAnim(x, y, id)
     local px = GetLocal().pos.x
     local py = GetLocal().pos.y
 
-    -- Paket 48 diarahkan ke koordinat tile (x, y)
-    SendPacketRaw(false,{
+    -- Animasi Tangan (Punch)
+    SendPacketRaw(false, {
         type = 0,
         state = 48,
         x = px,
@@ -85,8 +77,8 @@ function spliceAnim(x,y,id)
         tiley = y
     })
 
-    -- Paket visual item diletakkan
-    SendPacketRaw(false,{
+    -- Animasi Visual Item
+    SendPacketRaw(false, {
         type = 0,
         state = 3120,
         value = id,
@@ -97,10 +89,12 @@ function spliceAnim(x,y,id)
     })
 end
 
--- ===== PLACE =====
-function place(x,y,id)
-    spliceAnim(x,y,id)
-    SendPacketRaw(false,{
+-- ===== PLACE FUNCTION =====
+function place(x, y, id)
+    faceTile(x) -- Bot menghadap ke arah tile sebelum menaruh
+    spliceAnim(x, y, id)
+    
+    SendPacketRaw(false, {
         type = 3,
         value = id,
         px = x,
@@ -113,131 +107,123 @@ function place(x,y,id)
 end
 
 -- ===== SPLICE CORE =====
-function splice(x,y)
+function splice(x, y)
     waitPing()
-    local px,py = getPosTile()
+    local px, py = getPosTile()
 
-    if not inRange(px,py,x,y) then
-        FindPath(x,y,stepDelay)
-        Sleep(400)
+    if math.abs(px-x) > RANGE or math.abs(py-y) > RANGE then
+        FindPath(x, y, stepDelay)
+        -- Sinkronisasi posisi visual agar tidak kaku
+        SendPacketRaw(false, { type = 0, x = GetLocal().pos.x, y = GetLocal().pos.y, state = 0 })
+        Sleep(350) 
     end
 
     if inv(seedA) > 0 then
-        place(x,y,seedA)
-        waitPlaced(x,y)
+        place(x, y, seedA)
         Sleep(delay)
     end
 
     if inv(seedB) > 0 then
-        place(x,y,seedB)
-        waitPlaced(x,y)
+        place(x, y, seedB)
         Sleep(delay)
     end
 end
 
--- ===== CEK TANAM =====
-function canPlant(x,y)
-    local t = GetTile(x,y)
-    local b = GetTile(x,y+1)
-    if not t or not b then return false end
-    if t.fg ~= 0 then return false end
-    return b.fg ~= 0 and b.fg % 2 == 0 and b.fg ~= 6
-end
-
--- ===== FIND OBJECT =====
+-- ===== TAKE SEED LOGIC =====
 function findNearestObject(id)
     local objs = GetObjectList()
     local best = 999999
-    local bx,by = nil,nil
-    local px = GetLocal().pos.x
-    local py = GetLocal().pos.y
-    for _,obj in pairs(objs) do
+    local bx, by = nil, nil
+    local px, py = GetLocal().pos.x, GetLocal().pos.y
+
+    for _, obj in pairs(objs) do
         if obj.id == id then
             local dist = math.sqrt((obj.pos.x-px)^2 + (obj.pos.y-py)^2)
             if dist < best then
                 best = dist
-                bx = math.floor(obj.pos.x/32)
-                by = math.floor(obj.pos.y/32)
+                bx, by = math.floor(obj.pos.x/32), math.floor(obj.pos.y/32)
             end
         end
     end
-    return bx,by
+    return bx, by
 end
 
--- ===== TAKE SEED DARI LANTAI =====
 function takeSeedID(id)
-    local x,y = findNearestObject(id)
+    local x, y = findNearestObject(id)
     if x then
-        FindPath(x,y,stepDelay)
+        FindPath(x, y, stepDelay)
         Sleep(500)
-        SendPacket(2,"action|take")
+        SendPacket(2, "action|take")
         Sleep(500)
     end
 end
 
--- ===== FUNGSI AMBIL SEED (AUTO TAKE) =====
 function ambilSeed()
-    LogToConsole("Seed habis -> OTW ambil di storage")
+    LogToConsole("Seed habis! Ke storage...")
     warp(worldTake)
-    Sleep(1500)
-
-    -- Looping sampai minimal punya 1 seed dari masing-masing jenis
+    Sleep(2000)
     while inv(seedA) == 0 or inv(seedB) == 0 do
         if inv(seedA) == 0 then takeSeedID(seedA) end
         if inv(seedB) == 0 then takeSeedID(seedB) end
         Sleep(400)
     end
-
-    LogToConsole("Seed terisi -> balik kerja")
+    LogToConsole("Seed penuh, lanjut kerja!")
     warp(worldFarm)
-    Sleep(1500)
-    spliceLeftover()
+    Sleep(2000)
 end
 
--- ===== SMART CHECK =====
 function cekSeedSmart()
     if inv(seedA) == 0 or inv(seedB) == 0 then
         ambilSeed()
     end
 end
 
--- ===== SCAN SISA SEED =====
+-- ===== SCANNING & SPLICING =====
+function canPlant(x, y)
+    local t = GetTile(x, y)
+    local b = GetTile(x, y + 1)
+    if not t or not b then return false end
+    return t.fg == 0 and b.fg ~= 0 and b.fg % 2 == 0 and b.fg ~= 6
+end
+
 function spliceLeftover()
     local w = GetWorld()
-    for y = 0, w.height-1 do
-        for x = 0, w.width-1 do
-            local t = GetTile(x,y)
+    for y = 0, w.height - 1 do
+        for x = 0, w.width - 1 do
+            local t = GetTile(x, y)
             if t and (t.fg == seedA or t.fg == seedB) then
-                splice(x,y)
+                splice(x, y)
             end
         end
     end
 end
 
--- ===== ZIGZAG ROW =====
 function spliceRow(y)
     local w = GetWorld()
-    local xs,xe,step = 0,w.width-1,1
-    if y % 2 == 1 then xs,xe,step = w.width-1,0,-1 end
+    local xs, xe, step = 0, w.width - 1, 1
+    if y % 2 == 1 then xs, xe, step = w.width - 1, 0, -1 end
+    
     local x = xs
-    while (step==1 and x<=xe) or (step==-1 and x>=xe) do
+    while (step == 1 and x <= xe) or (step == -1 and x >= xe) do
         cekSeedSmart()
-        local t = GetTile(x,y)
-        if t and (t.fg == seedA or t.fg == seedB) then splice(x,y) end
-        if canPlant(x,y) then splice(x,y) end
+        local t = GetTile(x, y)
+        if (t and (t.fg == seedA or t.fg == seedB)) or canPlant(x, y) then
+            splice(x, y)
+        end
         x = x + step
     end
 end
 
--- ===== MAIN THREAD =====
+-- ===== START PROGRAM =====
 RunThread(function()
     warp(worldFarm)
     Sleep(1500)
     cekSeedSmart()
     spliceLeftover()
+    
     local w = GetWorld()
-    for y = 0, w.height-1 do
+    for y = 0, w.height - 1 do
         spliceRow(y)
     end
-    LogToConsole("Selesai Bang!")
+    LogToConsole("Semua Baris Selesai!")
 end)
