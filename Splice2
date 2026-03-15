@@ -1,16 +1,32 @@
 --=========== CONFIG ===========
 local seedA = 107
 local seedB = 169
-local delay = 200 -- Delay antar place agar animasi terlihat jelas
+local delay = 210           -- Delay dasar
 local RANGE = 2
-local stepDelay = 200
+local stepDelay = 400
 
 local worldTake = "Savekubreak|abangku1"
-local worldFarm = "vvcrl|b18"
+local worldFarm = "vvrcl|b18"
+
+-- FITUR ANTI-BAN (TAMBAHAN)
+local useRandomDelay = true  -- Menambah variasi milidetik
+local restEvery = 60         -- Setiap 50 kali tanam, bot akan istirahat sejenak
+local restDuration = 3000    -- Istirahat selama 3 detik
+local plantCount = 0
 --===============================
 
 local lastPingLog = 0
-local pingLogDelay = 4000
+local pingLogDelay = 5000
+
+-- ===== RANDOMIZER (Supaya pola tidak terbaca server) =====
+function sleepRandom(ms)
+    if useRandomDelay then
+        local randomMs = math.random(ms, ms + 70) -- Menambah 0-70ms secara acak
+        Sleep(randomMs)
+    else
+        Sleep(ms)
+    end
+end
 
 -- ===== INVENTORY =====
 function inv(id)
@@ -20,38 +36,10 @@ function inv(id)
     return 0
 end
 
--- ===== POSISI TILE PLAYER =====
-function getPosTile()
-    return math.floor(GetLocal().pos.x/32), math.floor(GetLocal().pos.y/32)
-end
-
--- ===== PING CHECK =====
-function waitPing()
-    while true do
-        local ping = GetClient().ping
-        if ping <= 500 then break end
-        LogToConsole("Ping tinggi ("..ping.."ms), delay...")
-        Sleep(1000)
-    end
-end
-
--- ===== WARP =====
-function warp(world)
-    if GetWorld().name ~= world:upper() then
-        SendPacket(3,"action|join_request\nname|"..world)
-        Sleep(6000)
-    end
-end
-
--- ===== ARAH HADAP (FACING) =====
+-- ===== ARAH HADAP =====
 function faceTile(x)
     local px = math.floor(GetLocal().pos.x / 32)
-    local flag = 0
-    if x < px then
-        flag = 48 -- Hadap Kiri
-    else
-        flag = 32 -- Hadap Kanan
-    end
+    local flag = (x < px) and 48 or 32
     
     SendPacketRaw(false, {
         type = 0,
@@ -62,78 +50,58 @@ function faceTile(x)
     })
 end
 
--- ===== ANIMASI PERSIS VIDEO =====
+-- ===== ANIMASI & PLACE =====
 function spliceAnim(x, y, id)
-    local px = GetLocal().pos.x
-    local py = GetLocal().pos.y
-
-    -- Animasi Tangan (Punch)
-    SendPacketRaw(false, {
-        type = 0,
-        state = 48,
-        x = px,
-        y = py,
-        tilex = x,
-        tiley = y
-    })
-
-    -- Animasi Visual Item
-    SendPacketRaw(false, {
-        type = 0,
-        state = 3120,
-        value = id,
-        x = px,
-        y = py,
-        tilex = x,
-        tiley = y
-    })
+    local px, py = GetLocal().pos.x, GetLocal().pos.y
+    SendPacketRaw(false, {type = 0, state = 48, x = px, y = py, tilex = x, tiley = y})
+    SendPacketRaw(false, {type = 0, state = 3120, value = id, x = px, y = py, tilex = x, tiley = y})
 end
 
--- ===== PLACE FUNCTION =====
 function place(x, y, id)
-    faceTile(x) -- Bot menghadap ke arah tile sebelum menaruh
+    faceTile(x)
     spliceAnim(x, y, id)
-    
     SendPacketRaw(false, {
-        type = 3,
-        value = id,
-        px = x,
-        py = y,
-        x = GetLocal().pos.x,
-        y = GetLocal().pos.y,
-        tilex = x,
-        tiley = y
+        type = 3, value = id, px = x, py = y,
+        x = GetLocal().pos.x, y = GetLocal().pos.y, tilex = x, tiley = y
     })
+    
+    -- Hitung jumlah tanam untuk fitur istirahat
+    plantCount = plantCount + 1
+    if plantCount >= restEvery then
+        LogToConsole("Anti-Ban: Istirahat sejenak...")
+        Sleep(restDuration)
+        plantCount = 0
+    end
 end
 
 -- ===== SPLICE CORE =====
 function splice(x, y)
-    waitPing()
-    local px, py = getPosTile()
+    local ping = GetClient().ping
+    if ping > 600 then Sleep(2000) end -- Berhenti otomatis jika lag parah (menghindari glitch)
+
+    local px, py = math.floor(GetLocal().pos.x/32), math.floor(GetLocal().pos.y/32)
 
     if math.abs(px-x) > RANGE or math.abs(py-y) > RANGE then
         FindPath(x, y, stepDelay)
-        -- Sinkronisasi posisi visual agar tidak kaku
-        SendPacketRaw(false, { type = 0, x = GetLocal().pos.x, y = GetLocal().pos.y, state = 0 })
-        Sleep(350) 
+        sleepRandom(300) 
     end
 
     if inv(seedA) > 0 then
         place(x, y, seedA)
-        Sleep(delay)
+        sleepRandom(delay)
     end
 
     if inv(seedB) > 0 then
         place(x, y, seedB)
-        Sleep(delay)
+        sleepRandom(delay)
     end
 end
 
--- ===== TAKE SEED LOGIC =====
-function findNearestObject(id)
+-- ===== TAKE SEED LOGIC (Sesuai aslimu) =====
+function takeSeedID(id)
     local objs = GetObjectList()
-    local best = 999999
     local bx, by = nil, nil
+    local best = 999999
     local px, py = GetLocal().pos.x, GetLocal().pos.y
 
     for _, obj in pairs(objs) do
@@ -145,57 +113,32 @@ function findNearestObject(id)
             end
         end
     end
-    return bx, by
-end
-
-function takeSeedID(id)
-    local x, y = findNearestObject(id)
-    if x then
-        FindPath(x, y, stepDelay)
-        Sleep(500)
+    if bx then
+        FindPath(bx, by, stepDelay)
+        Sleep(600)
         SendPacket(2, "action|take")
-        Sleep(500)
+        Sleep(600)
     end
 end
 
 function ambilSeed()
-    LogToConsole("Seed habis! Ke storage...")
+    LogToConsole("Anti-Ban: Menuju storage dengan pola acak...")
     warp(worldTake)
-    Sleep(2000)
+    Sleep(math.random(2000, 3500)) -- Random delay saat warp
     while inv(seedA) == 0 or inv(seedB) == 0 do
         if inv(seedA) == 0 then takeSeedID(seedA) end
         if inv(seedB) == 0 then takeSeedID(seedB) end
-        Sleep(400)
+        Sleep(500)
     end
-    LogToConsole("Seed penuh, lanjut kerja!")
     warp(worldFarm)
-    Sleep(2000)
+    Sleep(math.random(2000, 3000))
 end
 
-function cekSeedSmart()
-    if inv(seedA) == 0 or inv(seedB) == 0 then
-        ambilSeed()
-    end
-end
-
--- ===== SCANNING & SPLICING =====
+-- ===== SCANNING & ROW LOGIC =====
 function canPlant(x, y)
-    local t = GetTile(x, y)
-    local b = GetTile(x, y + 1)
+    local t, b = GetTile(x, y), GetTile(x, y+1)
     if not t or not b then return false end
     return t.fg == 0 and b.fg ~= 0 and b.fg % 2 == 0 and b.fg ~= 6
-end
-
-function spliceLeftover()
-    local w = GetWorld()
-    for y = 0, w.height - 1 do
-        for x = 0, w.width - 1 do
-            local t = GetTile(x, y)
-            if t and (t.fg == seedA or t.fg == seedB) then
-                splice(x, y)
-            end
-        end
-    end
 end
 
 function spliceRow(y)
@@ -203,27 +146,27 @@ function spliceRow(y)
     local xs, xe, step = 0, w.width - 1, 1
     if y % 2 == 1 then xs, xe, step = w.width - 1, 0, -1 end
     
-    local x = xs
-    while (step == 1 and x <= xe) or (step == -1 and x >= xe) do
-        cekSeedSmart()
+    for x = xs, xe, step do
+        if inv(seedA) == 0 or inv(seedB) == 0 then ambilSeed() end
         local t = GetTile(x, y)
         if (t and (t.fg == seedA or t.fg == seedB)) or canPlant(x, y) then
             splice(x, y)
         end
-        x = x + step
     end
 end
 
--- ===== START PROGRAM =====
+-- ===== MAIN PROGRAM =====
 RunThread(function()
+    math.randomseed(os.time()) -- Inisialisasi angka acak
     warp(worldFarm)
-    Sleep(1500)
-    cekSeedSmart()
-    spliceLeftover()
+    Sleep(2000)
     
     local w = GetWorld()
     for y = 0, w.height - 1 do
+        LogToConsole("Processing Row: "..y)
         spliceRow(y)
+        -- Tambahan delay setiap ganti baris agar lebih natural
+        Sleep(math.random(500, 1200)) 
     end
-    LogToConsole("Semua Baris Selesai!")
+    LogToConsole("Semua Selesai, Bot Standby.")
 end)
