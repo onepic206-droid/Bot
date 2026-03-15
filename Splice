@@ -2,7 +2,7 @@
 local seedA = 107
 local seedB = 169
 local delay = 150
-local RANGE = 3
+local RANGE = 2
 local stepDelay = 200
 
 local worldTake = "Savekubreak|abangku1"
@@ -30,7 +30,6 @@ end
 
 -- ===== PING CHECK =====
 function waitPing()
-
     while true do
         local ping = GetClient().ping
         LogToConsole("Ping: "..ping.." ms")
@@ -42,7 +41,6 @@ function waitPing()
         LogToConsole("Ping tinggi, pause splice...")
         Sleep(1000)
     end
-
 end
 
 
@@ -75,7 +73,7 @@ end
 
 
 -- ===== ANIMASI SPLICE =====
-function spliceAnim(x,y)
+function spliceAnim(x,y,id)
 
     local px = GetLocal().pos.x
     local py = GetLocal().pos.y
@@ -90,7 +88,7 @@ function spliceAnim(x,y)
     SendPacketRaw(false,{
         type = 0,
         state = 3120,
-        value = 15,
+        value = id,
         x = px,
         y = py,
         tilex = x,
@@ -103,7 +101,7 @@ end
 -- ===== PLACE =====
 function place(x,y,id)
 
-    spliceAnim(x,y)
+    spliceAnim(x,y,id)
 
     SendPacketRaw(false,{
         type = 3,
@@ -111,9 +109,10 @@ function place(x,y,id)
         px = x,
         py = y,
         x = GetLocal().pos.x,
-        y = GetLocal().pos.y
+        y = GetLocal().pos.y,
+        tilex = x,
+        tiley = y
     })
-
 end
 
 
@@ -126,7 +125,7 @@ function splice(x,y)
 
     if not inRange(px,py,x,y) then
         FindPath(x,y,stepDelay)
-        Sleep(350)
+        Sleep(600)
     end
 
     if inv(seedA) > 0 then
@@ -186,7 +185,7 @@ function takeSeedID(id)
     local x,y = findNearestObject(id)
     if x then
         FindPath(x,y,stepDelay)
-        Sleep(400)
+        Sleep(500)
         SendPacket(2,"action|take")
         Sleep(500)
     end
@@ -218,6 +217,9 @@ function ambilSeed()
 
     warp(worldFarm)
     Sleep(1500)
+
+    -- scan ulang seed miss setelah balik
+    spliceLeftover()
 
 end
 
