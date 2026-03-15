@@ -9,6 +9,10 @@ local worldTake = "Savekubreak|abangku1"
 local worldFarm = "WFJEW|b18"
 --===============================
 
+-- tambahan log ping agar tidak spam
+local lastPingLog = 0
+local pingLogDelay = 4000
+
 
 -- ===== INVENTORY =====
 function inv(id)
@@ -30,9 +34,16 @@ end
 
 -- ===== PING CHECK =====
 function waitPing()
+
     while true do
+
         local ping = GetClient().ping
-        LogToConsole("Ping: "..ping.." ms")
+        local now = os.clock()*1000
+
+        if now - lastPingLog > pingLogDelay then
+            LogToConsole("Ping: "..ping.." ms")
+            lastPingLog = now
+        end
 
         if ping <= 500 then
             break
@@ -40,7 +51,9 @@ function waitPing()
 
         LogToConsole("Ping tinggi, pause splice...")
         Sleep(1000)
+
     end
+
 end
 
 
@@ -72,7 +85,7 @@ function waitPlaced(x,y)
 end
 
 
--- ===== ANIMASI SPLICE =====
+-- ===== ANIMASI SPLICE (SESUAI TILE) =====
 function spliceAnim(x,y,id)
 
     local px = GetLocal().pos.x
@@ -113,6 +126,7 @@ function place(x,y,id)
         tilex = x,
         tiley = y
     })
+
 end
 
 
@@ -218,7 +232,7 @@ function ambilSeed()
     warp(worldFarm)
     Sleep(1500)
 
-    -- scan ulang seed miss setelah balik
+    -- tambahan scan seed miss setelah balik
     spliceLeftover()
 
 end
