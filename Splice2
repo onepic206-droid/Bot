@@ -1,21 +1,64 @@
 --=========== CONFIG ===========
 local seedA = 107
 local seedB = 169
-local delay = 200
+local delay = 150
 
 local worldTake = "Savekubreak|abangku1"
 local worldFarm = "VVRCL|b18"
 
-local PING_LIMIT = 500 -- batas ping
+local PING_LIMIT = 500
 --===============================
 
 
 -- ===== CEK PING =====
 function waitPingStable()
     while GetClient().ping > PING_LIMIT do
-        LogToConsole("Ping tinggi ("..GetClient().ping..") → menunggu...")
+        LogToConsole("Ping tinggi ("..GetClient().ping..") → menunggu")
         Sleep(500)
     end
+end
+
+
+-- ===== POSISI TILE PLAYER =====
+function getPosTile()
+    return math.floor(GetLocal().pos.x/32),
+           math.floor(GetLocal().pos.y/32)
+end
+
+
+-- ===== SMOOTH PATH (GERAK HALUS) =====
+function smoothPath(tx,ty)
+
+    local px,py = getPosTile()
+
+    while px ~= tx or py ~= ty do
+
+        if px < tx then px = px + 1
+        elseif px > tx then px = px - 1 end
+
+        if py < ty then py = py + 1
+        elseif py > ty then py = py - 1 end
+
+        FindPath(px,py,50)
+
+        Sleep(90)
+
+    end
+
+end
+
+
+-- ===== HADAP TILE =====
+function faceTile(x)
+
+    local px = math.floor(GetLocal().pos.x/32)
+
+    if x > px then
+        SendPacketRaw(false,{type=0,state=16})
+    elseif x < px then
+        SendPacketRaw(false,{type=0,state=48})
+    end
+
 end
 
 
@@ -27,25 +70,6 @@ function inv(id)
         end
     end
     return 0
-end
-
-
--- ===== POSISI TILE PLAYER =====
-function getPosTile()
-    return math.floor(GetLocal().pos.x/32),
-           math.floor(GetLocal().pos.y/32)
-end
-
-
--- ===== HADAP TILE =====
-function faceTile(x)
-    local px = math.floor(GetLocal().pos.x/32)
-
-    if x > px then
-        SendPacketRaw(false,{type = 0, state = 16}) -- kanan
-    elseif x < px then
-        SendPacketRaw(false,{type = 0, state = 48}) -- kiri
-    end
 end
 
 
@@ -71,12 +95,14 @@ function waitPlaced(x,y)
 end
 
 
--- ===== PLACE (ANIMASI + FACE TILE) =====
+-- ===== PLACE =====
 function place(x,y,id)
 
     waitPingStable()
 
     faceTile(x)
+
+    Sleep(100)
 
     SendPacketRaw(false,{
         type = 3,
@@ -95,8 +121,12 @@ function splice(x,y)
 
     waitPingStable()
 
-    FindPath(x,y,200)
-    Sleep(350)
+    local px,py = getPosTile()
+
+    if px ~= x or py ~= y then
+        smoothPath(x,y)
+        Sleep(120)
+    end
 
     if inv(seedA) > 0 then
         place(x,y,seedA)
@@ -125,6 +155,7 @@ end
 
 -- ===== FIND FLOATING TERDEKAT =====
 function findNearestObject(id)
+
     local objs = GetObjectList()
     local best = 99999
     local bx,by = nil,nil
@@ -134,14 +165,18 @@ function findNearestObject(id)
 
     for _,obj in pairs(objs) do
         if obj.id == id then
+
             local dist = math.sqrt((obj.pos.x-px)^2 + (obj.pos.y-py)^2)
+
             if dist < best then
                 best = dist
                 bx = math.floor(obj.pos.x/32)
                 by = math.floor(obj.pos.y/32)
             end
+
         end
     end
+
     return bx,by
 end
 
@@ -154,8 +189,9 @@ function takeSeedID(id)
     local x,y = findNearestObject(id)
 
     if x then
-        FindPath(x,y,200)
-        Sleep(350)
+        smoothPath(x,y)
+
+        Sleep(200)
 
         SendPacket(2,"action|take")
         Sleep(450)
