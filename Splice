@@ -1,11 +1,10 @@
 --=========== CONFIG ===========
-local seedA = 613
-local seedB = 13
-local delay = 100 
+local seedA = 107
+local seedB = 169
+local delay = 200
 
 local worldTake = "Savekubreak|abangku1"
 local worldFarm = "VVRCL|b18"
-local worldSave = "DUNIA_SIMPAN_SEED" -- Ganti dengan world tujuan drop
 --===============================
 
 function inv(id)
@@ -28,18 +27,18 @@ function getFg(x,y)
     return -1
 end
 
--- ===== SMOOTH MOVE & PLACE =====
+-- ===== SMOOTH MOVE & PLACE (DENGAN ANIMASI) =====
 function place(x, y, id)
-    -- Range 400 untuk pencarian jalan lebih luas
+    -- Bergerak ke posisi target dengan range 400
     FindPath(x, y, 400) 
     
     local px = GetLocal().pos.x
     local py = GetLocal().pos.y
     
-    -- Face Direction: 48 (Kanan), 0 (Kiri)
+    -- Logika Hadap: 48 (Kanan), 0 (Kiri)
     local state = ((x * 32) > px) and 48 or 0
 
-    -- Kirim Paket Gerak untuk update Facing (Arah)
+    -- Kirim paket update arah karakter agar tidak kaku
     SendPacketRaw(false, {
         type = 0,
         x = px,
@@ -47,7 +46,7 @@ function place(x, y, id)
         state = state
     })
 
-    -- Paket Tanam (State 3120 + Paket Tanam)
+    -- Paket Tanam (State 3120 untuk animasi tangan meletakkan)
     SendPacketRaw(false, {
         type = 3,
         value = id,
@@ -70,7 +69,7 @@ function splice(x, y)
         end
     end
 
-    -- Tanam Seed B
+    -- Tanam Seed B (Splicing)
     if inv(seedB) > 0 and getFg(x,y) == seedA then
         place(x, y, seedB)
         local t = 0
@@ -83,29 +82,11 @@ function splice(x, y)
     Sleep(delay)
 end
 
--- ===== AUTO DROP SEED (Maks 200) =====
-function cekAndDrop()
-    -- Ganti ID_HASIL_SPLICE dengan ID seed hasil campuran Anda
-    local seedHasil = 0 -- ISI DISINI (Contoh: 123)
-    
-    if inv(seedHasil) >= 200 then
-        LogToConsole("Seed mencapai 200! Pergi ke world simpan...")
-        warp(worldSave)
-        Sleep(1000)
-        -- Logika drop (Opsional: Cari posisi kosong dulu)
-        SendPacket(2, "action|drop\nitemID|" .. seedHasil)
-        SendPacket(2, "dialog_return|drop_item\nitemID|" .. seedHasil .. "|\ncount|" .. inv(seedHasil))
-        Sleep(1000)
-        warp(worldFarm)
-    end
-end
-
--- ===== LOGIKA PENDUKUNG =====
+-- ===== LOGIKA PENGAMBILAN MATERIAL =====
 
 function canPlant(x,y)
     local t, b = GetTile(x,y), GetTile(x,y+1)
     if not t or not b then return false end
-    -- Cek tile atas kosong (0) dan tile bawah adalah tanah/block solid
     return t.fg == 0 and b.fg ~= 0 and b.fg % 2 == 0 and b.fg ~= 6
 end
 
@@ -114,26 +95,27 @@ function takeSeedID(id)
     for _, obj in pairs(objs) do
         if obj.id == id then
             FindPath(math.floor(obj.pos.x/32), math.floor(obj.pos.y/32), 400)
-            Sleep(200)
+            Sleep(250)
             SendPacket(2,"action|take")
-            Sleep(300)
+            Sleep(350)
             return
         end
     end
 end
 
 function ambilSeed()
-    LogToConsole("Kurang material, mengambil di: " .. worldTake)
+    LogToConsole("Seed habis, mengambil ke: " .. worldTake)
     warp(worldTake)
     while inv(seedA) == 0 or inv(seedB) == 0 do
         if inv(seedA) == 0 then takeSeedID(seedA) end
         if inv(seedB) == 0 then takeSeedID(seedB) end
         Sleep(200)
     end
+    LogToConsole("Seed siap, kembali ke: " .. worldFarm)
     warp(worldFarm)
 end
 
--- ===== MAIN LOOP =====
+-- ===== MAIN THREAD =====
 RunThread(function()
     warp(worldFarm)
     while true do
@@ -141,27 +123,28 @@ RunThread(function()
         local workFound = false
         
         for y = 0, w.height-1 do
-            -- Snake movement (kiri-kanan-kanan-kiri)
+            -- Snake movement row
             local xs, xe, step = 0, w.width-1, 1
             if y % 2 == 1 then xs, xe, step = w.width-1, 0, -1 end
             
             for x = xs, xe, step do
                 local fg = getFg(x,y)
                 
-                -- Pengecekan Seed
-                if inv(seedA) == 0 or inv(seedB) == 0 then ambilSeed() end
+                -- Cek stok sebelum kerja
+                if inv(seedA) == 0 or inv(seedB) == 0 then 
+                    ambilSeed() 
+                end
                 
-                -- Cek apakah butuh di-splice atau ditanam baru
+                -- Jika butuh splice atau bisa ditanam
                 if fg == seedA or fg == seedB or canPlant(x,y) then
                     workFound = true
                     splice(x,y)
-                    -- cekAndDrop() -- Aktifkan jika ingin cek jumlah seed setiap tanam
                 end
             end
         end
 
         if not workFound then
-            LogToConsole("Selesai! Tidak ada lahan tersisa.")
+            LogToConsole("Semua lahan sudah penuh ditanam!")
             break
         end
         Sleep(1000)
