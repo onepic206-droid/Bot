@@ -1,13 +1,13 @@
 --=========== CONFIG ===========
-local seedA = 107        
-local seedB = 169       
+local seedA = 107      
+local seedB = 169        
 local delayTanam = 180   
 local delayPath = 400    
 local RANGE = 2         
 local MAX_PING = 500     
 
 local worldFarm = "WFJEW|b18"
-local worldTake = "FARMLIST138|abangku1" -- World ambil seed
+local worldTake = "savekubreak|abangku1"
 --===============================
 
 function randomDelay(base)
@@ -25,19 +25,31 @@ end
 
 function warp(world)
     if GetWorld().name ~= world:upper() then
-        LogToConsole("Warping ke " .. world)
         SendPacket(3,"action|join_request\nname|"..world)
         randomDelay(5000)
     end
 end
 
--- ===== FUNGSI AMBIL STOK =====
+-- ===== CEK KONSTRUKSI TILE =====
+function isSolidOrPlatform(x, y)
+    local tile = GetTile(x, y)
+    if not tile then return false end
+    
+    local properties = GetItemInfo(tile.fg)
+    -- Cek apakah blok tersebut solid atau tipe platform
+    if properties.type == 0 or properties.type == 1 or properties.type == 18 then
+        -- Abaikan jika itu Bedrock (ID 6)
+        return tile.fg ~= 6
+    end
+    return false
+end
+
+-- ===== AMBIL STOK =====
 function handleStock()
     if inv(seedA) == 0 or inv(seedB) == 0 then
-        LogToConsole("Stok habis, ambil bahan...")
+        LogToConsole("Stok habis, ke gudang...")
         warp(worldTake)
         
-        -- Ambil Seed A dan Seed B dari lantai
         local idsToTake = {seedA, seedB}
         for _, id in ipairs(idsToTake) do
             if inv(id) == 0 then
@@ -47,7 +59,7 @@ function handleStock()
                         randomDelay(500)
                         SendPacket(2, "action|take")
                         randomDelay(800)
-                        if inv(id) > 0 then break end -- Sudah dapat, lanjut ID berikutnya
+                        if inv(id) > 0 then break end
                     end
                 end
             end
@@ -56,6 +68,7 @@ function handleStock()
     end
 end
 
+-- ===== ANIMASI & ARAH =====
 function faceAndPlace(x, y, id)
     local localX = GetLocal().pos.x
     local targetPixelX = x * 32
@@ -73,26 +86,39 @@ function faceAndPlace(x, y, id)
     randomDelay(delayTanam)
 end
 
-function moveAndSplice(x, y, id)
+function moveAndExecute(x, y, id)
     local px, py = math.floor(GetLocal().pos.x/32), math.floor(GetLocal().pos.y/32)
     if math.abs(px - x) > RANGE or math.abs(py - y) > RANGE then
         FindPath(x, y, delayPath)
-        randomDelay(100)
+        randomDelay(150)
     end
     faceAndPlace(x, y, id)
 end
 
-function handleSplice(x, y)
+-- ===== LOGIKA SMART SPLICE PADA BLOK =====
+function processTile(x, y)
     local tile = GetTile(x, y)
-    if not tile then return end
+    
+    -- Kita mencari blok SOLID atau PLATFORM (untuk dijadikan alas)
+    if not isSolidOrPlatform(x, y) then return end
 
-    if tile.fg == 0 then
-        moveAndSplice(x, y, seedA)
-        moveAndSplice(x, y, seedB)
-    elseif tile.fg == seedA then
-        moveAndSplice(x, y, seedB)
-    elseif tile.fg == seedB then
-        moveAndSplice(x, y, seedA)
+    -- Koordinat tanam adalah 1 baris di ATAS blok tersebut
+    local tx, ty = x, y - 1
+    local targetTile = GetTile(tx, ty)
+    if not targetTile then return end
+
+    -- Pastikan targetTile kosong atau berisi seed jomblo (BUKAN pohon/tree)
+    -- Tree biasanya memiliki tipe item khusus, kita cek ID-nya
+    if targetTile.fg == 0 then
+        handleStock()
+        moveAndExecute(tx, ty, seedA)
+        moveAndExecute(tx, ty, seedB)
+    elseif targetTile.fg == seedA then
+        handleStock()
+        moveAndExecute(tx, ty, seedB)
+    elseif targetTile.fg == seedB then
+        handleStock()
+        moveAndExecute(tx, ty, seedA)
     end
 end
 
@@ -109,25 +135,16 @@ RunThread(function()
             if y % 2 == 1 then startX, endX, step = w.width - 1, 0, -1 end
 
             for x = startX, endX, step do
-                -- 1. Cek Ping
+                -- Anti-Lag
                 if GetClient().ping >= MAX_PING then
                     while GetClient().ping >= MAX_PING do Sleep(2000) end
                 end
 
-                -- 2. Cek apakah tile butuh ditanam/splice
-                local t = GetTile(x, y)
-                local b = GetTile(x, y + 1)
-                
-                if t and b and (t.fg == 0 or t.fg == seedA or t.fg == seedB) and (b.fg ~= 0 and b.fg ~= 6) then
-                    -- 3. Cek Stok sebelum eksekusi
-                    handleStock()
-                    -- 4. Eksekusi Splice
-                    handleSplice(x, y)
-                end
+                processTile(x, y)
             end
         end
         
-        LogToConsole("World Clear / Siklus Selesai.")
+        LogToConsole("Siklus Splice Selesai.")
         randomDelay(10000)
     end
 end)
