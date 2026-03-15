@@ -1,162 +1,230 @@
 --=========== CONFIG ===========
-local seedA = 107
-local seedB = 169
-local delay = 200
-local maxPing = 500 -- Batas ping maksimal sebelum bot "berhenti sejenak"
+local seedA = 169
+local seedB = 107
+local delay = 150
+local stepDelay = 200
 
-local worldTake = "Savekubreak|abangku1"
-local worldFarm = "VVRCL|b18"
+local WORLDFARM = "WFJEW|b18"
+local WORLDTAKE = "savekubreak|abangku1"
 --===============================
 
--- Fungsi Baru: Menunggu ping stabil
-function checkPing()
-    local currentPing = GetClient().ping
-    if currentPing >= maxPing then
-        LogToConsole("Ping Leg: " .. currentPing .. "ms. Menunggu stabil...")
-        while GetClient().ping >= maxPing do
-            Sleep(1000) -- Cek setiap 1 detik sampai stabil
-        end
-        LogToConsole("Ping kembali normal: " .. GetClient().ping .. "ms. Melanjutkan...")
-    end
-end
 
+-- ===============================
+-- INVENTORY CHECK
+-- ===============================
 function inv(id)
     for _, item in pairs(GetInventory()) do
-        if item.id == id then return item.amount end
+        if item.id == id then
+            return item.amount
+        end
     end
     return 0
 end
 
-function warp(world)
-    checkPing() -- Cek koneksi sebelum pindah world
-    if GetWorld().name ~= world:upper() then
-        SendPacket(3,"action|join_request\nname|"..world)
-        Sleep(6000)
+
+-- ===============================
+-- PING CHECK (FITUR BARU)
+-- ===============================
+function checkPing()
+
+    local ping = GetClient().ping
+    LogToConsole("Ping: " .. ping .. " ms")
+
+    while ping > 500 do
+        LogToConsole("Ping tinggi! Menunggu stabil...")
+        Sleep(2000)
+        ping = GetClient().ping
+        LogToConsole("Ping: " .. ping .. " ms")
+    end
+
+end
+
+
+-- ===============================
+-- JOIN WORLD (BOTHEX)
+-- ===============================
+function joinWorld(name)
+
+    LogToConsole("Joining: "..name)
+    RequestJoinWorld(name)
+
+    local timeout = 0
+
+    while timeout < 20 do
+
+        local w = GetWorld()
+
+        if w and w.name and w.name:upper() == name:upper() then
+            LogToConsole("Berhasil masuk: "..name)
+            Sleep(1000)
+            return true
+        end
+
+        Sleep(500)
+        timeout = timeout + 1
+    end
+
+    LogToConsole("Gagal masuk: "..name)
+    return false
+end
+
+
+-- ===============================
+-- AUTO TAKE FLOATING SEED
+-- ===============================
+function takeSeed()
+
+    LogToConsole("Mengambil floating seed...")
+
+    for _, obj in pairs(GetObjectList()) do
+
+        if obj.id == seedA or obj.id == seedB then
+
+            local tx = obj.pos.x // 32
+            local ty = obj.pos.y // 32
+
+            if CheckPath(tx, ty) then
+                FindPath(tx, ty, 400) -- revisi path
+                Sleep(300)
+            end
+
+        end
     end
 end
 
-function getFg(x,y)
-    local t = GetTile(x,y)
-    if t then return t.fg end
-    return -1
+
+-- ===============================
+-- AUTO AMBIL SEED JIKA HABIS
+-- ===============================
+function autoTake()
+
+    LogToConsole("Seed habis! Ke WORLDTAKE...")
+
+    if joinWorld(WORLDTAKE) then
+
+        Sleep(1500)
+
+        takeSeed()
+
+        Sleep(2000)
+
+        LogToConsole("Kembali ke WORLDFARM...")
+
+        joinWorld(WORLDFARM)
+
+    end
 end
 
--- ===== SMOOTH MOVE & PLACE (DENGAN PING CHECK) =====
-function place(x, y, id)
-    checkPing() -- Pastikan tidak lag sebelum bergerak/menanam
-    
-    FindPath(x, y, 400) 
-    local px = GetLocal().pos.x
-    local py = GetLocal().pos.y
-    local state = ((x * 32) > px) and 48 or 0
 
-    SendPacketRaw(false, {
+-- ===============================
+-- NATURAL PLACE (FITUR BARU)
+-- ===============================
+function placeSeed(id,x,y)
+
+    local me = GetLocal()
+
+    -- animasi tangan
+    SendPacketRaw(false,{
         type = 0,
-        x = px,
-        y = py,
-        state = state
+        state = 3120,
+        value = id,
+        x = me.pos.x,
+        y = me.pos.y,
+        tilex = x,
+        tiley = y
     })
 
-    SendPacketRaw(false, {
+    Sleep(40)
+
+    -- place seed
+    SendPacketRaw(false,{
         type = 3,
         value = id,
-        px = x,
-        py = y,
-        x = px,
-        y = py,
-        state = 3120 
+        int_x = x,
+        int_y = y,
+        pos_x = me.pos.x,
+        pos_y = me.pos.y
     })
+
 end
 
-function splice(x, y)
-    -- Tanam Seed A
-    if inv(seedA) > 0 and getFg(x,y) == 0 then
-        place(x, y, seedA)
-        local t = 0
-        while getFg(x,y) ~= seedA and t < 15 do
-            Sleep(80)
-            t = t + 1
-        end
-    end
 
-    -- Tanam Seed B (Splicing)
-    if inv(seedB) > 0 and getFg(x,y) == seedA then
-        place(x, y, seedB)
-        local t = 0
-        while getFg(x,y) == seedA and t < 15 do
-            Sleep(80)
-            t = t + 1
-        end
-    end
-    
-    Sleep(delay)
-end
+-- ===============================
+-- MAIN SPLICE LOOP
+-- ===============================
+function startSplice()
 
--- ... [Fungsi canPlant, takeSeedID, ambilSeed tetap sama] ...
+    joinWorld(WORLDFARM)
 
-function canPlant(x,y)
-    local t, b = GetTile(x,y), GetTile(x,y+1)
-    if not t or not b then return false end
-    return t.fg == 0 and b.fg ~= 0 and b.fg % 2 == 0 and b.fg ~= 6
-end
-
-function takeSeedID(id)
-    checkPing()
-    local objs = GetObjectList()
-    for _, obj in pairs(objs) do
-        if obj.id == id then
-            FindPath(math.floor(obj.pos.x/32), math.floor(obj.pos.y/32), 400)
-            Sleep(250)
-            SendPacket(2,"action|take")
-            Sleep(350)
-            return
-        end
-    end
-end
-
-function ambilSeed()
-    LogToConsole("Seed habis, mengambil ke: " .. worldTake)
-    warp(worldTake)
-    while inv(seedA) == 0 or inv(seedB) == 0 do
-        if inv(seedA) == 0 then takeSeedID(seedA) end
-        if inv(seedB) == 0 then takeSeedID(seedB) end
-        Sleep(200)
-    end
-    LogToConsole("Seed siap, kembali ke: " .. worldFarm)
-    warp(worldFarm)
-end
-
--- ===== MAIN THREAD =====
-RunThread(function()
-    warp(worldFarm)
     while true do
-        local w = GetWorld()
-        local workFound = false
-        
-        -- Menampilkan ping setiap awal scan baris (opsional)
-        LogToConsole("Ping saat ini: " .. GetClient().ping .. " ms")
 
-        for y = 0, w.height-1 do
-            local xs, xe, step = 0, w.width-1, 1
-            if y % 2 == 1 then xs, xe, step = w.width-1, 0, -1 end
-            
-            for x = xs, xe, step do
-                if inv(seedA) == 0 or inv(seedB) == 0 then 
-                    ambilSeed() 
+        local w = GetWorld()
+        local planted = false
+
+        for y = 0, w.height - 1 do
+
+            local startX, endX, step = 0, w.width - 1, 1
+
+            if y % 2 == 1 then
+                startX, endX, step = w.width - 1, 0, -1
+            end
+
+            for x = startX, endX, step do
+
+                -- FITUR BARU
+                checkPing()
+
+                -- CEK SEED
+                if inv(seedA) == 0 or inv(seedB) == 0 then
+                    autoTake()
+                    Sleep(1000)
                 end
-                
-                local fg = getFg(x,y)
-                if fg == seedA or fg == seedB or canPlant(x,y) then
-                    workFound = true
-                    splice(x,y)
+
+                local t = GetTile(x, y)
+                local b = GetTile(x, y + 1)
+
+                -- SYARAT SPLICE
+                if t and t.fg == 0 and b and b.fg ~= 0 and b.fg ~= 6 then
+
+                    planted = true
+
+                    if CheckPath(x, y) then
+
+                        FindPath(x, y, 400) -- revisi path
+                        Sleep(stepDelay)
+
+                        -- TANAM SEED A
+                        SetItemSelected(seedA)
+                        placeSeed(seedA,x,y)
+                        Sleep(delay)
+
+                        -- TANAM SEED B
+                        SetItemSelected(seedB)
+                        placeSeed(seedB,x,y)
+                        Sleep(delay)
+
+                    end
                 end
             end
         end
 
-        if not workFound then
-            LogToConsole("Semua lahan sudah penuh ditanam!")
+
+        -- Kalau tidak ada tile bisa ditanam
+        if not planted then
+            LogToConsole("World sudah penuh / tidak bisa splice lagi.")
             break
         end
-        Sleep(1000)
+
     end
+
+    LogToConsole("Splice selesai total.")
+
+end
+
+
+-- ===============================
+-- START THREAD
+-- ===============================
+RunThread(function()
+    startSplice()
 end)
