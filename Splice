@@ -3,37 +3,50 @@ local seedA = 169
 local seedB = 107
 local delay = 150
 local stepDelay = 200
-local MAX_PING = 500 -- Berhenti sejenak jika ping di atas 500ms
+local MAX_PING = 500 -- Bot diam jika ping di atas ini
 
 local WORLDFARM = "WFJEW|b18"   -- isi nama world farm (UPPERCASE)
 local WORLDTAKE = "savekubreak|abangku1"   -- isi nama world take (UPPERCASE)
 --===============================
 
 -- ===============================
--- INVENTORY & UTILS
+-- UTILS & CHECKERS
 -- ===============================
 function inv(id)
     for _, item in pairs(GetInventory()) do
-        if item.id == id then
-            return item.amount
-        end
+        if item.id == id then return item.amount end
     end
     return 0
 end
 
--- Menunggu tile benar-benar terisi sebelum lanjut (Anti-Skip)
+-- Menunggu tile terisi (Anti-Skip/Lag)
 function waitPlaced(x, y)
     for i = 1, 10 do
         local t = GetTile(x, y)
-        if t and t.fg ~= 0 then
-            return true
-        end
+        if t and t.fg ~= 0 then return true end
         Sleep(100)
     end
     return false
 end
 
--- Fitur tambahan: Menjaga bot saat lag parah
+-- Fitur pengecekan world penuh (Sesuai request Anda)
+function isSpliced()
+    local w = GetWorld()
+    if not w then return false end
+    for y = 0, w.height - 2 do
+        for x = 0, w.width - 1 do
+            local t = GetTile(x, y)
+            local b = GetTile(x, y + 1)
+            -- Jika ada tile kosong (0) di atas blok padat (ID Genap)
+            if t and t.fg == 0 and b and b.fg ~= 0 and b.fg % 2 == 0 and b.fg ~= 6 then
+                return false -- Masih ada lahan kosong
+            end
+        end
+    end
+    return true -- World sudah penuh total
+end
+
+-- Fitur menjaga bot saat koneksi buruk
 function pingGuard()
     while GetPing() > MAX_PING do
         LogToConsole("Ping Tinggi: " .. GetPing() .. "ms. Menunggu stabil...")
@@ -59,7 +72,6 @@ function joinWorld(name)
         Sleep(500)
         timeout = timeout + 1
     end
-
     LogToConsole("Gagal masuk: "..name)
     return false
 end
@@ -69,16 +81,13 @@ end
 -- ===============================
 function takeSeed()
     LogToConsole("Mengambil floating seed...")
-
     for _, obj in pairs(GetObjectList()) do
         if obj.id == seedA or obj.id == seedB then
             local tx = obj.pos.x // 32
             local ty = obj.pos.y // 32
-
             if CheckPath(tx, ty) then
                 FindPath(tx, ty)
                 Sleep(300)
-                -- Mengambil objek di koordinat tersebut
                 SendPacket(2, "action|take")
                 Sleep(200)
             end
@@ -86,12 +95,8 @@ function takeSeed()
     end
 end
 
--- ===============================
--- AUTO AMBIL SEED JIKA HABIS
--- ===============================
 function autoTake()
     LogToConsole("Seed habis! Ke WORLDTAKE...")
-    
     if joinWorld(WORLDTAKE) then
         Sleep(1500)
         takeSeed()
@@ -102,24 +107,22 @@ function autoTake()
 end
 
 -- ===============================
--- SAPU BERSIH TILE TERTINGGAL
+-- SAPU BERSIH (CLEAN UP)
 -- ===============================
 function spliceLeftover()
     local w = GetWorld()
     for y = 0, w.height - 1 do
         for x = 0, w.width - 1 do
             local t = GetTile(x, y)
-            -- Jika tile hanya berisi salah satu seed (gagal splice)
             if t and (t.fg == seedA or t.fg == seedB) then
                 if CheckPath(x, y) then
                     FindPath(x, y)
                     Sleep(stepDelay)
-                    
-                    local idToPlant = (t.fg == seedA) and seedB or seedA
-                    if inv(idToPlant) > 0 then
-                        SetItemSelected(idToPlant)
+                    local target = (t.fg == seedA) and seedB or seedA
+                    if inv(target) > 0 then
+                        SetItemSelected(target)
                         SendPacketRaw(false, {
-                            type = 3, value = idToPlant, int_x = x, int_y = y,
+                            type = 3, value = target, int_x = x, int_y = y,
                             pos_x = GetLocal().pos.x, pos_y = GetLocal().pos.y
                         })
                         Sleep(delay)
@@ -134,71 +137,56 @@ end
 -- MAIN SPLICE LOOP
 -- ===============================
 function startSplice()
-
     joinWorld(WORLDFARM)
 
     while true do
-        pingGuard()
+        pingGuard() -- Cek stabilitas
         
-        -- Cek dan selesaikan tile yang tertinggal (setiap siklus)
+        -- Jika world sudah penuh berdasarkan scan isSpliced, bot berhenti
+        if isSpliced() then
+            LogToConsole("Scan World: SUDAH PENUH.")
+            break
+        end
+
+        -- Bersihkan sisa-sisa yang tertinggal (lag tadi)
         spliceLeftover()
 
         local w = GetWorld()
-        local planted = false
+        local plantedThisCycle = false
 
         for y = 0, w.height - 1 do
-            
             local startX, endX, step = 0, w.width - 1, 1
-            if y % 2 == 1 then
-                startX, endX, step = w.width - 1, 0, -1
-            end
+            if y % 2 == 1 then startX, endX, step = w.width - 1, 0, -1 end
 
             for x = startX, endX, step do
-
-                -- CEK SEED
-                if inv(seedA) == 0 or inv(seedB) == 0 then
-                    autoTake()
-                    Sleep(1000)
-                end
+                if inv(seedA) == 0 or inv(seedB) == 0 then autoTake() end
 
                 local t = GetTile(x, y)
                 local b = GetTile(x, y + 1)
 
-                -- SYARAT SPLICE
+                -- Syarat Splice
                 if t and t.fg == 0 and b and b.fg ~= 0 and b.fg ~= 6 then
-                    
-                    planted = true
-
+                    plantedThisCycle = true
                     if CheckPath(x, y) then
                         FindPath(x, y)
                         Sleep(stepDelay)
-
                         local me = GetLocal()
 
-                        -- TANAM SEED A
+                        -- Tanam SEED A
                         SetItemSelected(seedA)
                         SendPacketRaw(false,{
-                            type = 3,
-                            value = seedA,
-                            int_x = x,
-                            int_y = y,
-                            pos_x = me.pos.x,
-                            pos_y = me.pos.y
+                            type = 3, value = seedA, int_x = x, int_y = y,
+                            pos_x = me.pos.x, pos_y = me.pos.y
                         })
-                        
-                        -- Fitur Utama: Tunggu sampai server merespon penanaman seed A
+
+                        -- Verifikasi penanaman sebelum lanjut SEED B
                         if waitPlaced(x, y) then
                             Sleep(delay)
-
-                            -- TANAM SEED B (SPLICE)
+                            -- Tanam SEED B
                             SetItemSelected(seedB)
                             SendPacketRaw(false,{
-                                type = 3,
-                                value = seedB,
-                                int_x = x,
-                                int_y = y,
-                                pos_x = me.pos.x,
-                                pos_y = me.pos.y
+                                type = 3, value = seedB, int_x = x, int_y = y,
+                                pos_x = me.pos.x, pos_y = me.pos.y
                             })
                             Sleep(delay)
                         end
@@ -207,15 +195,10 @@ function startSplice()
             end
         end
 
-        -- Kalau tidak ada tile bisa ditanam
-        if not planted then
-            LogToConsole("World sudah penuh / tidak bisa splice lagi.")
-            break
-        end
-
+        if not plantedThisCycle then break end
     end
 
-    LogToConsole("Splice selesai total.")
+    LogToConsole("Splice Selesai. World Penuh.")
 end
 
 -- ===============================
