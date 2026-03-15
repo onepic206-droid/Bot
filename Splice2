@@ -1,0 +1,243 @@
+--=========== CONFIG ===========
+local seedA = 107
+local seedB = 169
+local delay = 200 
+local RANGE = 2
+local stepDelay = 200
+
+local worldTake = "Savekubreak|abangku1"
+local worldFarm = "WFJEW|b18"
+--===============================
+
+local lastPingLog = 0
+local pingLogDelay = 4000
+
+-- ===== INVENTORY =====
+function inv(id)
+    for _, item in pairs(GetInventory()) do
+        if item.id == id then
+            return item.amount
+        end
+    end
+    return 0
+end
+
+-- ===== POSISI TILE PLAYER =====
+function getPosTile()
+    return math.floor(GetLocal().pos.x/32),
+           math.floor(GetLocal().pos.y/32)
+end
+
+-- ===== PING CHECK =====
+function waitPing()
+    while true do
+        local ping = GetClient().ping
+        local now = os.clock()*1000
+        if now - lastPingLog > pingLogDelay then
+            LogToConsole("Ping: "..ping.." ms")
+            lastPingLog = now
+        end
+        if ping <= 500 then
+            break
+        end
+        LogToConsole("Ping tinggi, pause splice...")
+        Sleep(1000)
+    end
+end
+
+-- ===== WARP =====
+function warp(world)
+    if GetWorld().name ~= world:upper() then
+        SendPacket(3,"action|join_request\nname|"..world)
+        Sleep(6000)
+    end
+end
+
+-- ===== RANGE CHECK =====
+function inRange(px,py,x,y)
+    return math.abs(px-x) <= RANGE and math.abs(py-y) <= RANGE
+end
+
+-- ===== CEK TILE SUDAH KE-PLACE =====
+function waitPlaced(x,y)
+    for i = 1,10 do
+        local t = GetTile(x,y)
+        if t and t.fg ~= 0 then
+            return true
+        end
+        Sleep(120)
+    end
+    return false
+end
+
+-- ===== ANIMASI REVISI (BIAR GAK BLING) =====
+function spliceAnim(x,y,id)
+    local px = GetLocal().pos.x
+    local py = GetLocal().pos.y
+
+    -- Paket 48 diarahkan ke koordinat tile (x, y)
+    SendPacketRaw(false,{
+        type = 0,
+        state = 48,
+        x = px,
+        y = py,
+        tilex = x,
+        tiley = y
+    })
+
+    -- Paket visual item diletakkan
+    SendPacketRaw(false,{
+        type = 0,
+        state = 3120,
+        value = id,
+        x = px,
+        y = py,
+        tilex = x,
+        tiley = y
+    })
+end
+
+-- ===== PLACE =====
+function place(x,y,id)
+    spliceAnim(x,y,id)
+    SendPacketRaw(false,{
+        type = 3,
+        value = id,
+        px = x,
+        py = y,
+        x = GetLocal().pos.x,
+        y = GetLocal().pos.y,
+        tilex = x,
+        tiley = y
+    })
+end
+
+-- ===== SPLICE CORE =====
+function splice(x,y)
+    waitPing()
+    local px,py = getPosTile()
+
+    if not inRange(px,py,x,y) then
+        FindPath(x,y,stepDelay)
+        Sleep(400)
+    end
+
+    if inv(seedA) > 0 then
+        place(x,y,seedA)
+        waitPlaced(x,y)
+        Sleep(delay)
+    end
+
+    if inv(seedB) > 0 then
+        place(x,y,seedB)
+        waitPlaced(x,y)
+        Sleep(delay)
+    end
+end
+
+-- ===== CEK TANAM =====
+function canPlant(x,y)
+    local t = GetTile(x,y)
+    local b = GetTile(x,y+1)
+    if not t or not b then return false end
+    if t.fg ~= 0 then return false end
+    return b.fg ~= 0 and b.fg % 2 == 0 and b.fg ~= 6
+end
+
+-- ===== FIND OBJECT =====
+function findNearestObject(id)
+    local objs = GetObjectList()
+    local best = 999999
+    local bx,by = nil,nil
+    local px = GetLocal().pos.x
+    local py = GetLocal().pos.y
+    for _,obj in pairs(objs) do
+        if obj.id == id then
+            local dist = math.sqrt((obj.pos.x-px)^2 + (obj.pos.y-py)^2)
+            if dist < best then
+                best = dist
+                bx = math.floor(obj.pos.x/32)
+                by = math.floor(obj.pos.y/32)
+            end
+        end
+    end
+    return bx,by
+end
+
+-- ===== TAKE SEED DARI LANTAI =====
+function takeSeedID(id)
+    local x,y = findNearestObject(id)
+    if x then
+        FindPath(x,y,stepDelay)
+        Sleep(500)
+        SendPacket(2,"action|take")
+        Sleep(500)
+    end
+end
+
+-- ===== FUNGSI AMBIL SEED (AUTO TAKE) =====
+function ambilSeed()
+    LogToConsole("Seed habis -> OTW ambil di storage")
+    warp(worldTake)
+    Sleep(1500)
+
+    -- Looping sampai minimal punya 1 seed dari masing-masing jenis
+    while inv(seedA) == 0 or inv(seedB) == 0 do
+        if inv(seedA) == 0 then takeSeedID(seedA) end
+        if inv(seedB) == 0 then takeSeedID(seedB) end
+        Sleep(400)
+    end
+
+    LogToConsole("Seed terisi -> balik kerja")
+    warp(worldFarm)
+    Sleep(1500)
+    spliceLeftover()
+end
+
+-- ===== SMART CHECK =====
+function cekSeedSmart()
+    if inv(seedA) == 0 or inv(seedB) == 0 then
+        ambilSeed()
+    end
+end
+
+-- ===== SCAN SISA SEED =====
+function spliceLeftover()
+    local w = GetWorld()
+    for y = 0, w.height-1 do
+        for x = 0, w.width-1 do
+            local t = GetTile(x,y)
+            if t and (t.fg == seedA or t.fg == seedB) then
+                splice(x,y)
+            end
+        end
+    end
+end
+
+-- ===== ZIGZAG ROW =====
+function spliceRow(y)
+    local w = GetWorld()
+    local xs,xe,step = 0,w.width-1,1
+    if y % 2 == 1 then xs,xe,step = w.width-1,0,-1 end
+    local x = xs
+    while (step==1 and x<=xe) or (step==-1 and x>=xe) do
+        cekSeedSmart()
+        local t = GetTile(x,y)
+        if t and (t.fg == seedA or t.fg == seedB) then splice(x,y) end
+        if canPlant(x,y) then splice(x,y) end
+        x = x + step
+    end
+end
+
+-- ===== MAIN THREAD =====
+RunThread(function()
+    warp(worldFarm)
+    Sleep(1500)
+    cekSeedSmart()
+    spliceLeftover()
+    local w = GetWorld()
+    for y = 0, w.height-1 do
+        spliceRow(y)
+    end
+    LogToConsole("Selesai Bang!")
+end)
