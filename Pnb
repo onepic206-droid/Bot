@@ -7,7 +7,7 @@
 -- CONFIG WORLD
 -- =========================
 local WORLD = "savekubreak|abangku1"
-local PNB_X = 19
+local PNB_X = 17
 local PNB_Y = 53
 
 local delay = 200
@@ -17,7 +17,7 @@ local reconnect_delay = 5000
 -- CONFIG PNB
 -- =========================
 local item_id = 230
-local put_count = 5
+local put_count = 3
 local delay_put = 150
 local delay_break = 180
 local delay_loop = 250
