@@ -1,0 +1,226 @@
+--========== SETTING ==========
+local Seed_id   = 
+local Block_id  = 
+local MaxBlock  = 200
+
+local delayPunch = 200
+local RADIUS     = 4
+local LOOP_DELAY = 180
+
+-- JOIN DELAY
+local PRE_JOIN_DELAY = 1000
+local JOIN_DELAY     = 5000
+
+-- DROP START TILE
+local DROP_X = 83
+local DROP_Y = 23
+
+local DropItems = {}
+local GEM_ID = 112
+
+--========== MULTI WORLD ==========
+local WorldFarmList = {"WFJEW|b18"}
+local WorldSaveList = {"savekubreak|abangku1"}
+
+--========== DROP MEMORY ==========
+local lastDropCoord = {}
+for _, w in ipairs(WorldSaveList) do
+    lastDropCoord[w] = {x = DROP_X, y = DROP_Y}
+end
+
+--========== TILE FULL DETECTOR ==========
+local tileFull = false
+
+AddHook("OnVariant","DetectFullTile",function(var)
+    if var[0] == "OnTextOverlay" then
+        local msg = (var[1] or ""):lower()
+
+        -- lebih fleksibel deteksinya
+        if msg:find("emptier") or msg:find("spot") then
+            tileFull = true
+        end
+    end
+end)
+
+--========== SAFE GET WORLD ==========
+function getWorldName()
+    local w = GetWorld()
+    return (w and w.name) and w.name or ""
+end
+
+--========== SAFE INVENTORY ==========
+function getAmount(id)
+    for _, item in pairs(GetInventory() or {}) do
+        if item.id == id then
+            return item.amount or 0
+        end
+    end
+    return 0
+end
+
+--========== SAFE PUNCH ==========
+function punch(x,y)
+    local me = GetLocal()
+    if not me then return end
+
+    SendPacketRaw(false,{
+        type = 3,
+        px = x,
+        py = y,
+        x = me.pos.x,
+        y = me.pos.y,
+        value = 18
+    })
+end
+
+--========== COLLECT ==========
+function collectNearby(radius)
+    local me = GetLocal()
+    if not me then return end
+
+    local px = math.floor(me.pos.x/32)
+    local py = math.floor(me.pos.y/32)
+
+    for _, obj in pairs(GetObjectList() or {}) do
+        if obj.id ~= GEM_ID then
+            local ox = math.floor((obj.pos.x+8)/32)
+            local oy = math.floor((obj.pos.y+8)/32)
+
+            if math.abs(px-ox) <= radius and math.abs(py-oy) <= radius then
+                SendPacketRaw(false,{
+                    type = 11,
+                    value = obj.oid,
+                    x = obj.pos.x,
+                    y = obj.pos.y
+                })
+            end
+        end
+    end
+end
+
+--========== READY TREE ==========
+function getReadyTrees()
+    local list = {}
+    for _, tile in pairs(GetTiles() or {}) do
+        if tile.fg == Seed_id and tile.extra and tile.extra.progress and tile.extra.progress >= 1 then
+            table.insert(list,{x=tile.x,y=tile.y})
+        end
+    end
+    return list
+end
+
+--========== HARVEST ==========
+function harvest()
+    for _, t in ipairs(getReadyTrees()) do
+
+        if getAmount(Block_id) >= MaxBlock then
+            return true
+        end
+
+        if CheckPath(t.x,t.y) then
+            FindPath(t.x,t.y)
+            Sleep(delayPunch)
+        end
+
+        punch(t.x,t.y)
+        Sleep(120)
+        collectNearby(RADIUS)
+    end
+    return false
+end
+
+--========== DROP FUNCTION ==========
+function DropAllItemsAutoMove(world)
+
+    local coord = lastDropCoord[world] or {x=DROP_X,y=DROP_Y}
+
+    while true do
+
+        -- hitung total item yg mau di drop
+        local total = 0
+        for _,id in ipairs(DropItems) do
+            total = total + getAmount(id)
+        end
+        if total <= 0 then break end
+
+        tileFull = false
+
+        FindPath(coord.x,coord.y)
+        Sleep(700)
+
+        for _,id in ipairs(DropItems) do
+            local amt = getAmount(id)
+
+            if amt > 0 then
+
+                SendPacket(2,"action|drop\nitemID|"..id)
+                Sleep(150)
+
+                SendPacket(2,
+                    "action|dialog_return\n"..
+                    "dialog_name|drop_item\n"..
+                    "itemID|"..id.."|\ncount|"..amt
+                )
+
+                Sleep(900)
+
+                -- kalau full geser kiri
+                if tileFull then
+                    coord.x = coord.x - 1
+                    Sleep(500)
+                    break
+                end
+            end
+        end
+
+        Sleep(300)
+    end
+
+    -- simpan koordinat terakhir
+    lastDropCoord[world] = {x = coord.x, y = coord.y}
+end
+
+--========== WARP ==========
+function warpToWorld(world)
+
+    local target = world:match("([^|]+)")
+    if not target then return end
+
+    if getWorldName() ~= target:upper() then
+
+        Sleep(PRE_JOIN_DELAY)
+        RequestJoinWorld(world)
+        Sleep(JOIN_DELAY)
+
+        local timeout = 0
+        while getWorldName() ~= target:upper() and timeout < 20 do
+            Sleep(500)
+            timeout = timeout + 1
+        end
+    end
+end
+
+--========== MAIN LOOP ==========
+while true do
+
+    for _, farmWorld in ipairs(WorldFarmList) do
+
+        warpToWorld(farmWorld)
+
+        if getAmount(Block_id) >= MaxBlock then
+            for _, saveWorld in ipairs(WorldSaveList) do
+                warpToWorld(saveWorld)
+                DropAllItemsAutoMove(saveWorld)
+            end
+        else
+            if harvest() then
+                for _, saveWorld in ipairs(WorldSaveList) do
+                    warpToWorld(saveWorld)
+                    DropAllItemsAutoMove(saveWorld)
+                end
+            end
+        end
+    end
+
+    Sleep(LOOP_DELAY)
+end
