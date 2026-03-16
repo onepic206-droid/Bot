@@ -1,0 +1,232 @@
+-- ==========================================
+-- AUTO PNB ADVANCE (STABLE + POSITION CHECK)
+-- FINAL REVISI (ANTI NIL + SAFE LOAD)
+-- ==========================================
+
+-- =========================
+-- CONFIG WORLD
+-- =========================
+local WORLD = "savekubreak|abangku1"
+local PNB_X = 19
+local PNB_Y = 53
+
+local delay = 200
+local reconnect_delay = 5000
+
+-- =========================
+-- CONFIG PNB
+-- =========================
+local item_id = 230
+local put_count = 5
+local delay_put = 150
+local delay_break = 180
+local delay_loop = 250
+
+local joined = false
+
+-- =========================
+-- BASIC FUNCTION
+-- =========================
+function inWorld()
+    return GetWorld() ~= nil
+end
+
+function worldLoaded()
+    return inWorld() and GetLocal() ~= nil
+end
+
+function getTilePos()
+    if GetLocal() == nil then return 0,0 end
+    local px = math.floor(GetLocal().pos.x / 32)
+    local py = math.floor(GetLocal().pos.y / 32)
+    return px, py
+end
+
+function tile(x,y)
+    local t = GetTile(x,y)
+    if t == nil then
+        return {fg = 0}
+    end
+    return t
+end
+
+-- =========================
+-- JOIN WORLD
+-- =========================
+function joinWorld()
+    SendPacket(3, "action|join_request\nname|"..WORLD)
+    Sleep(4000)
+end
+
+-- =========================
+-- WARP TILE (ANTI STUCK)
+-- =========================
+function warpTile(x,y)
+    if GetLocal() == nil then return end
+    SendPacketRaw(false, {
+        type = 3,
+        value = 32,
+        px = x,
+        py = y,
+        x = x * 32,
+        y = y * 32
+    })
+end
+
+-- =========================
+-- BACK TO PNB POSITION
+-- =========================
+function backPos()
+
+    if not worldLoaded() then
+        return false
+    end
+
+    local px, py = getTilePos()
+
+    -- jika belum di posisi PNB
+    if px ~= PNB_X or py ~= PNB_Y then
+
+        -- rejoin world supaya reset posisi
+        SendPacket(3, "action|join_request\nname|"..WORLD)
+        Sleep(4000)
+
+        if not worldLoaded() then
+            return false
+        end
+
+        px, py = getTilePos()
+
+        if px ~= PNB_X or py ~= PNB_Y then
+            local path = FindPath(PNB_X, PNB_Y)
+
+            if path then
+                Sleep(600)
+            else
+                warpTile(PNB_X, PNB_Y)
+                Sleep(800)
+            end
+        end
+
+        return false
+    end
+
+    return true
+end
+
+-- =========================
+-- PUT BLOCK
+-- =========================
+function put(posX,posY)
+
+    if not worldLoaded() then return end
+
+    local t = GetTile(posX,posY)
+    if t == nil then return end
+
+    if t.fg == 0 then
+        local pkt = {}
+        pkt.type = 3
+        pkt.value = item_id
+        pkt.px = posX
+        pkt.py = posY
+        pkt.x = GetLocal().pos.x
+        pkt.y = GetLocal().pos.y
+        SendPacketRaw(false,pkt)
+        Sleep(delay_put)
+    end
+end
+
+-- =========================
+-- BREAK PURE NO LIMIT
+-- =========================
+function break_no_limit(posX,posY)
+
+    if not worldLoaded() then return end
+
+    while true do
+
+        if not worldLoaded() then break end
+
+        local t = GetTile(posX,posY)
+        if t == nil then break end
+        if t.fg == 0 then break end
+
+        local pkt = {}
+        pkt.type = 3
+        pkt.value = 18
+        pkt.px = posX
+        pkt.py = posY
+        pkt.x = GetLocal().pos.x
+        pkt.y = GetLocal().pos.y
+        SendPacketRaw(false,pkt)
+
+        Sleep(delay_break)
+    end
+end
+
+-- =========================
+-- AUTO PNB FUNCTION
+-- =========================
+function runPNB()
+
+    if not worldLoaded() then return end
+
+    local locX, locY = getTilePos()
+
+    local positions = {
+        {locX-2, locY-2},
+        {locX-1, locY-2},
+        {locX,   locY-2},
+        {locX+1, locY-2},
+        {locX+2, locY-2}
+    }
+
+    -- PUT
+    for i = 1, put_count do
+        local pos = positions[i]
+        if pos then
+            put(pos[1], pos[2])
+        end
+    end
+
+    -- BREAK
+    for i = 1, put_count do
+        local pos = positions[i]
+        if pos then
+            break_no_limit(pos[1], pos[2])
+        end
+    end
+
+    Sleep(delay_loop)
+end
+
+-- =========================
+-- MAIN LOOP
+-- =========================
+while true do
+
+    -- jika DC
+    if not inWorld() then
+        joined = false
+        Sleep(reconnect_delay)
+    end
+
+    -- join hanya 1x
+    if not joined then
+        joinWorld()
+        joined = true
+        Sleep(2000)
+    end
+
+    -- balik posisi
+    local ready = backPos()
+
+    -- JALANKAN PNB HANYA JIKA SUDAH SAMPAI POSISI
+    if ready then
+        runPNB()
+    else
+        Sleep(500)
+    end
+
+end
