@@ -1,6 +1,6 @@
 -- =========== CONFIG ===========
-local seedA = 
-local seedB = 
+local seedA = 107
+local seedB = 169
 local delay = 150
 
 local worldTake = "Savekubreak|abangku1"
@@ -8,13 +8,13 @@ local worldTake = "Savekubreak|abangku1"
 -- Daftar world farm → dirotasi satu per satu
 -- Format: "WORLDNAME|password" (tanpa password cukup "WORLDNAME")
 local worldFarmList = {
-    "njdoJ",
-"vujxB",
-"vujxC",
-"vujxG",
-"vujxL",
-"vujxM",
-"vujxN",
+    "njdoJ|abangku1",
+"vujxB|abangku1",
+"vujxC|abangku1",
+"vujxG|abangku1",
+"vujxL|abangku1",
+"vujxM|abangku1",
+"vujxN|abangku1",
 }
 
 local PING_LIMIT = 500
