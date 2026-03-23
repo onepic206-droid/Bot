@@ -1,0 +1,420 @@
+-- =========== CONFIG ===========
+local seedA = 
+local seedB = 
+local delay = 150
+
+local worldTake = "Savekubreak|abangku1"
+
+-- Daftar world farm → dirotasi satu per satu
+-- Format: "WORLDNAME|password" (tanpa password cukup "WORLDNAME")
+local worldFarmList = {
+    "njdoJ",
+"vujxB",
+"vujxC",
+"vujxG",
+"vujxL",
+"vujxM",
+"vujxN",
+}
+
+local PING_LIMIT = 500
+local MAX_PLACE_RETRY = 5  -- maksimal retry place jika miss
+-- ================================
+
+
+-- ===== STATE MULTI WORLD =====
+local currentFarmIndex = 1  -- index world farm yang sedang aktif
+
+function getCurrentFarm()
+    return worldFarmList[currentFarmIndex]
+end
+
+function nextFarm()
+    currentFarmIndex = currentFarmIndex + 1
+    if currentFarmIndex > #worldFarmList then
+        currentFarmIndex = 1  -- balik ke awal jika sudah habis semua
+    end
+    LogToConsole("→ Pindah ke farm world ke-"..currentFarmIndex..": "..getCurrentFarm())
+end
+
+
+-- ===== CEK PING =====
+function waitPingStable()
+    while GetClient().ping > PING_LIMIT do
+        LogToConsole("Ping tinggi ("..GetClient().ping..") → menunggu stabil...")
+        Sleep(600)
+    end
+end
+
+
+-- ===== DELAY ADAPTIF BERDASARKAN PING =====
+-- makin tinggi ping, makin panjang delay
+function adaptiveDelay(base)
+    local ping = GetClient().ping
+    if ping > 300 then
+        return base + math.floor(ping * 0.8)
+    elseif ping > 150 then
+        return base + math.floor(ping * 0.4)
+    end
+    return base
+end
+
+
+-- ===== POSISI TILE PLAYER =====
+function getPosTile()
+    return math.floor(GetLocal().pos.x / 32),
+           math.floor(GetLocal().pos.y / 32)
+end
+
+
+-- ===== SMOOTH PATH (GERAK HALUS PER TILE) =====
+function smoothPath(tx, ty)
+    local px, py = getPosTile()
+    local maxStep = 40  -- batas langkah agar tidak loop selamanya
+
+    local step = 0
+    while (px ~= tx or py ~= ty) and step < maxStep do
+
+        local nx = px
+        local ny = py
+
+        if px < tx then nx = px + 1
+        elseif px > tx then nx = px - 1 end
+
+        if py < ty then ny = py + 1
+        elseif py > ty then ny = py - 1 end
+
+        FindPath(nx, ny, 50)
+        Sleep(adaptiveDelay(85))
+
+        -- update posisi setelah gerak
+        px, py = getPosTile()
+        step = step + 1
+    end
+end
+
+
+-- ===== HADAP TILE =====
+function faceTile(x)
+    local px = math.floor(GetLocal().pos.x / 32)
+    if x > px then
+        SendPacketRaw(false, {type = 0, state = 16})   -- hadap kanan
+    elseif x < px then
+        SendPacketRaw(false, {type = 0, state = 48})   -- hadap kiri
+    end
+    Sleep(30)
+end
+
+
+-- ===== INVENTORY =====
+function inv(id)
+    for _, item in pairs(GetInventory()) do
+        if item.id == id then
+            return item.amount
+        end
+    end
+    return 0
+end
+
+
+-- ===== WARP =====
+function warp(world)
+    -- ambil nama world saja (tanpa password) untuk cek nama world aktif
+    local worldName = (world:match("^([^|]+)") or world):upper()
+    if GetWorld().name ~= worldName then
+        SendPacket(3, "action|join_request\nname|" .. world)
+        Sleep(7000)
+    end
+end
+
+
+-- ===== CEK TILE SUDAH KE-PLACE (lebih ketat) =====
+function waitPlaced(x, y, expectedID)
+    for i = 1, 15 do
+        local t = GetTile(x, y)
+        if t then
+            -- cek apakah tile sudah terisi oleh seed yang kita place
+            if expectedID and t.fg == expectedID then return true end
+            -- atau cek fg tidak kosong secara umum
+            if not expectedID and t.fg ~= 0 then return true end
+        end
+        Sleep(adaptiveDelay(80))
+    end
+    return false
+end
+
+
+-- ===== PLACE DENGAN ANIMASI DAN RETRY =====
+function place(x, y, id)
+    waitPingStable()
+    faceTile(x)
+
+    -- animasi: pilih item dulu (biar ada visual select di inventory)
+    SetItemSelected(id)
+    Sleep(adaptiveDelay(80))
+
+    local success = false
+
+    for attempt = 1, MAX_PLACE_RETRY do
+
+        SendPacketRaw(false, {
+            type  = 3,
+            value = id,
+            px    = x,
+            py    = y,
+            x     = GetLocal().pos.x,
+            y     = GetLocal().pos.y
+        })
+
+        Sleep(adaptiveDelay(60))
+
+        -- cek apakah place berhasil
+        local t = GetTile(x, y)
+        if t and t.fg ~= 0 then
+            success = true
+            break
+        end
+
+        -- belum berhasil → tunggu sebentar lalu coba lagi
+        LogToConsole("Place miss di ("..x..","..y..") attempt "..attempt.." → retry")
+        Sleep(adaptiveDelay(120))
+    end
+
+    Sleep(adaptiveDelay(delay))
+    return success
+end
+
+
+-- ===== SPLICE DENGAN RETRY MISS =====
+function splice(x, y)
+    waitPingStable()
+
+    local px, py = getPosTile()
+
+    -- gerak smooth ke dekat tile target (jangan terlalu jauh)
+    if math.abs(px - x) > 3 or math.abs(py - y) > 3 then
+        smoothPath(x, y)
+        Sleep(adaptiveDelay(100))
+    else
+        -- jarak dekat: pakai FindPath langsung lebih cepat
+        if px ~= x or py ~= y then
+            FindPath(x, y, 400)
+            Sleep(adaptiveDelay(180))
+        end
+    end
+
+    -- ===== Place seedA =====
+    if inv(seedA) > 0 then
+        local t = GetTile(x, y)
+        -- hanya place jika tile masih kosong atau masih belum ada seedA
+        if t and t.fg ~= seedA then
+            place(x, y, seedA)
+            waitPlaced(x, y, seedA)
+            Sleep(adaptiveDelay(delay))
+        end
+    end
+
+    -- ===== Place seedB =====
+    if inv(seedB) > 0 then
+        local t = GetTile(x, y)
+        -- hanya place seedB jika seedA sudah ada (untuk splice)
+        if t and t.fg == seedA then
+            place(x, y, seedB)
+            waitPlaced(x, y, nil)
+            Sleep(adaptiveDelay(delay))
+        end
+    end
+end
+
+
+-- ===== CEK BISA TANAM =====
+function canPlant(x, y)
+    local t = GetTile(x, y)
+    local b = GetTile(x, y + 1)
+    if not t or not b then return false end
+    if t.fg ~= 0 then return false end
+    return b.fg ~= 0 and b.fg % 2 == 0 and b.fg ~= 6
+end
+
+
+-- ===== FIND FLOATING OBJECT TERDEKAT =====
+-- FIX: sekarang return posisi pixel (bukan tile) untuk akurasi FindPath
+function findNearestObject(id)
+    local objs = GetObjectList()
+    local best = 99999
+    local bpx, bpy = nil, nil  -- pixel position
+    local btx, bty = nil, nil  -- tile position
+
+    local px = GetLocal().pos.x
+    local py = GetLocal().pos.y
+
+    for _, obj in pairs(objs) do
+        if obj.id == id then
+            local dist = math.sqrt((obj.pos.x - px)^2 + (obj.pos.y - py)^2)
+            if dist < best then
+                best  = dist
+                bpx   = obj.pos.x
+                bpy   = obj.pos.y
+                btx   = math.floor(obj.pos.x / 32)
+                bty   = math.floor(obj.pos.y / 32)
+            end
+        end
+    end
+
+    return btx, bty, bpx, bpy
+end
+
+
+-- ===== TAKE SEED =====
+-- FIX: gerak smooth ke tile seed, bukan tile "sekitarnya"
+function takeSeedID(id)
+    waitPingStable()
+
+    local tx, ty, opx, opy = findNearestObject(id)
+
+    if tx == nil then return end
+
+    -- gerak smooth ke tile tempat seed berada
+    smoothPath(tx, ty)
+    Sleep(adaptiveDelay(150))
+
+    -- re-cek posisi objek setelah gerak (objek bisa pindah sedikit)
+    local tx2, ty2 = findNearestObject(id)
+    if tx2 and (tx2 ~= tx or ty2 ~= ty) then
+        FindPath(tx2, ty2, 400)
+        Sleep(adaptiveDelay(200))
+    end
+
+    -- ambil
+    SendPacket(2, "action|take")
+    Sleep(adaptiveDelay(400))
+end
+
+
+-- ===== AMBIL SEED =====
+function ambilSeed()
+    LogToConsole("Seed habis → ke TAKE world")
+
+    warp(worldTake)
+    Sleep(1500)
+
+    local tries = 0
+    while (inv(seedA) == 0 or inv(seedB) == 0) and tries < 30 do
+        if inv(seedA) == 0 then takeSeedID(seedA) end
+        if inv(seedB) == 0 then takeSeedID(seedB) end
+        Sleep(adaptiveDelay(300))
+        tries = tries + 1
+    end
+
+    LogToConsole("Seed OK → balik FARM: "..getCurrentFarm())
+
+    warp(getCurrentFarm())
+    Sleep(1500)
+
+    spliceLeftover()
+end
+
+
+function cekSeedSmart()
+    if inv(seedA) == 0 or inv(seedB) == 0 then
+        ambilSeed()
+    end
+end
+
+
+-- ===== SPLICE LEFTOVER (tile yang masih punya seedA/B belum splice) =====
+function spliceLeftover()
+    local w = GetWorld()
+
+    for y = 0, w.height - 1 do
+        for x = 0, w.width - 1 do
+            local t = GetTile(x, y)
+            if t and (t.fg == seedA or t.fg == seedB) then
+                cekSeedSmart()
+                splice(x, y)
+            end
+        end
+    end
+end
+
+
+-- ===== SPLICE PER ROW (serpentine kiri-kanan) =====
+function spliceRow(y)
+    local w = GetWorld()
+
+    -- arah berganti-ganti tiap baris (zig-zag) agar path lebih pendek
+    local xs, xe, step = 0, w.width - 1, 1
+    if y % 2 == 1 then xs, xe, step = w.width - 1, 0, -1 end
+
+    local x = xs
+    while (step == 1 and x <= xe) or (step == -1 and x >= xe) do
+
+        cekSeedSmart()
+
+        local t = GetTile(x, y)
+
+        -- jika tile masih ada seedA/B yang belum tersplice
+        if t and (t.fg == seedA or t.fg == seedB) then
+            splice(x, y)
+        end
+
+        -- jika tile kosong dan bisa ditanam
+        if canPlant(x, y) then
+            splice(x, y)
+        end
+
+        x = x + step
+    end
+end
+
+
+-- ===== CEK WORLD SELESAI (semua tile sudah tersplice / tidak ada yang bisa ditanam) =====
+function isWorldDone()
+    local w = GetWorld()
+    for y = 0, w.height - 1 do
+        for x = 0, w.width - 1 do
+            local t = GetTile(x, y)
+            if t and (t.fg == seedA or t.fg == seedB) then
+                return false  -- masih ada leftover
+            end
+            if canPlant(x, y) then
+                return false  -- masih ada tile kosong yang bisa ditanam
+            end
+        end
+    end
+    return true  -- semua sudah selesai
+end
+
+
+-- ===== MAIN LOOP =====
+RunThread(function()
+
+    warp(getCurrentFarm())
+    Sleep(1000)
+
+    while true do
+
+        LogToConsole("▶ Farming world: "..getCurrentFarm())
+
+        cekSeedSmart()
+        spliceLeftover()
+
+        local w = GetWorld()
+        for y = 0, w.height - 1 do
+            spliceRow(y)
+        end
+
+        -- cek apakah world sudah selesai semua
+        if isWorldDone() then
+            LogToConsole("✓ World "..getCurrentFarm().." selesai → pindah world berikutnya")
+            nextFarm()
+            warp(getCurrentFarm())
+            Sleep(2000)
+        else
+            LogToConsole("✓ 1 Cycle selesai → ulangi")
+            Sleep(500)
+        end
+
+    end
+
+end)
