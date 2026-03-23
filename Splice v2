@@ -1,12 +1,12 @@
-
 --=========== CONFIG ===========
 local seedA = 107
 local seedB = 169
 local delay = 120
 
 local worldTake = "Savekubreak|abangku1"
+local worldFarm = "VVRCL|b18"
 
--- MULTI WORLD FARM
+-- TAMBAHAN MULTI WORLD + INDEX
 local worldFarmList = {
  "njdoJ|abangku1",
 "vujxB|abangku1",
@@ -17,24 +17,10 @@ local worldFarmList = {
 "vujxN|abangku1",
 }
 
-local currentFarmIndex = 1  -- index world farm aktif
+local worldIndex = 1
 
 local PING_LIMIT = 500
 --===============================
-
-
--- ===== HELPER MULTI FARM =====
-function getCurrentFarm()
-    return worldFarmList[currentFarmIndex]
-end
-
-function nextFarm()
-    currentFarmIndex = currentFarmIndex + 1
-    if currentFarmIndex > #worldFarmList then
-        currentFarmIndex = 1
-    end
-    LogToConsole("Pindah ke farm: " .. getCurrentFarm())
-end
 
 
 -- ===== CEK PING =====
@@ -53,28 +39,39 @@ function getPosTile()
 end
 
 
--- ===== SMOOTH PATH (GERAK HALUS) =====
+-- ===== SMOOTH PATH =====
 function smoothPath(tx,ty)
+
     local px,py = getPosTile()
+
     while px ~= tx or py ~= ty do
+
         if px < tx then px = px + 1
         elseif px > tx then px = px - 1 end
+
         if py < ty then py = py + 1
         elseif py > ty then py = py - 1 end
+
         FindPath(px,py,50)
+
         Sleep(90)
+
     end
+
 end
 
 
 -- ===== HADAP TILE =====
 function faceTile(x)
+
     local px = math.floor(GetLocal().pos.x/32)
+
     if x > px then
         SendPacketRaw(false,{type=0,state=16})
     elseif x < px then
         SendPacketRaw(false,{type=0,state=48})
     end
+
 end
 
 
@@ -113,9 +110,13 @@ end
 
 -- ===== PLACE =====
 function place(x,y,id)
+
     waitPingStable()
+
     faceTile(x)
+
     Sleep(100)
+
     SendPacketRaw(false,{
         type = 3,
         value = id,
@@ -124,28 +125,37 @@ function place(x,y,id)
         x = GetLocal().pos.x,
         y = GetLocal().pos.y
     })
+
     Sleep(50)
+
 end
 
 
--- ===== SPLICE =====
+-- ===== SPLICE (REVISI RINGAN, TANPA UBAH FLOW) =====
 function splice(x,y)
+
     waitPingStable()
+
     local px,py = getPosTile()
-    if px ~= x or py ~= y then
+
+    -- tambahan kecil: biar gak spam path
+    if math.abs(px - x) > 1 or math.abs(py - y) > 1 then
         FindPath(x,y,400)
-        Sleep(250)
+        Sleep(200)
     end
+
     if inv(seedA) > 0 then
         place(x,y,seedA)
         waitPlaced(x,y)
         Sleep(delay)
     end
+
     if inv(seedB) > 0 then
         place(x,y,seedB)
         waitPlaced(x,y)
         Sleep(delay)
     end
+
 end
 
 
@@ -159,34 +169,72 @@ function canPlant(x,y)
 end
 
 
+-- ===== TAMBAHAN: CEK WORLD MASIH ADA SPLICE =====
+function worldMasihAdaSplice()
+
+    local w = GetWorld()
+
+    for y = 0, w.height-1 do
+        for x = 0, w.width-1 do
+
+            local t = GetTile(x,y)
+
+            if t then
+                if t.fg == seedA or t.fg == seedB then
+                    return true
+                end
+
+                if canPlant(x,y) then
+                    return true
+                end
+            end
+
+        end
+    end
+
+    return false
+end
+
+
 -- ===== FIND FLOATING TERDEKAT =====
 function findNearestObject(id)
+
     local objs = GetObjectList()
     local best = 99999
     local bx,by = nil,nil
+
     local px = GetLocal().pos.x
     local py = GetLocal().pos.y
+
     for _,obj in pairs(objs) do
         if obj.id == id then
+
             local dist = math.sqrt((obj.pos.x-px)^2 + (obj.pos.y-py)^2)
+
             if dist < best then
                 best = dist
                 bx = math.floor(obj.pos.x/32)
                 by = math.floor(obj.pos.y/32)
             end
+
         end
     end
+
     return bx,by
 end
 
 
 -- ===== TAKE SEED =====
 function takeSeedID(id)
+
     waitPingStable()
+
     local x,y = findNearestObject(id)
+
     if x then
         FindPath(x,y,400)
         Sleep(200)
+
         SendPacket(2,"action|take")
         Sleep(450)
     end
@@ -195,18 +243,22 @@ end
 
 -- ===== AMBIL SEED =====
 function ambilSeed()
+
     LogToConsole("Seed habis → ke TAKE")
+
     warp(worldTake)
     Sleep(1000)
+
     while inv(seedA) == 0 or inv(seedB) == 0 do
+
         if inv(seedA) == 0 then takeSeedID(seedA) end
         if inv(seedB) == 0 then takeSeedID(seedB) end
+
         Sleep(300)
     end
+
     LogToConsole("Seed dapat → balik FARM")
-    warp(getCurrentFarm())
-    Sleep(1000)
-    spliceLeftover()
+
 end
 
 
@@ -219,13 +271,18 @@ end
 
 -- ===== SPLICE LEFTOVER =====
 function spliceLeftover()
+
     local w = GetWorld()
+
     for y = 0, w.height-1 do
         for x = 0, w.width-1 do
+
             local t = GetTile(x,y)
+
             if t and (t.fg == seedA or t.fg == seedB) then
                 splice(x,y)
             end
+
         end
     end
 end
@@ -233,46 +290,71 @@ end
 
 -- ===== SPLICE PER ROW =====
 function spliceRow(y)
+
     local w = GetWorld()
+
     local xs,xe,step = 0,w.width-1,1
     if y % 2 == 1 then xs,xe,step = w.width-1,0,-1 end
+
     local x = xs
+
     while (step==1 and x<=xe) or (step==-1 and x>=xe) do
+
         cekSeedSmart()
+
         local t = GetTile(x,y)
+
         if t and (t.fg == seedA or t.fg == seedB) then
             splice(x,y)
         end
+
         if canPlant(x,y) then
             splice(x,y)
         end
+
         x = x + step
     end
+
 end
 
 
--- ===== MAIN =====
+-- ===== MAIN (REVISI WORLD INDEX) =====
 RunThread(function()
-
-    warp(getCurrentFarm())
 
     while true do
 
-        cekSeedSmart()
-        spliceLeftover()
+        local world = worldFarmList[worldIndex]
 
-        local w = GetWorld()
-
-        for y = 0, w.height-1 do
-            spliceRow(y)
+        if world == nil then
+            worldIndex = 1
+            world = worldFarmList[worldIndex]
         end
 
-        LogToConsole("1 Cycle selesai di " .. getCurrentFarm() .. " → pindah farm berikutnya")
+        LogToConsole("Masuk world index "..worldIndex.." : "..world)
 
-        -- Pindah ke world farm berikutnya setelah 1 cycle
-        nextFarm()
-        warp(getCurrentFarm())
-        Sleep(1000)
+        warp(world)
+        Sleep(1500)
+
+        -- wajib bersih dulu baru pindah
+        while worldMasihAdaSplice() do
+
+            cekSeedSmart()
+            spliceLeftover()
+
+            local w = GetWorld()
+
+            for y = 0, w.height-1 do
+                spliceRow(y)
+            end
+
+            Sleep(200)
+        end
+
+        LogToConsole("Selesai world index "..worldIndex)
+
+        worldIndex = worldIndex + 1
+
+        Sleep(500)
 
     end
 
