@@ -3,21 +3,20 @@ local seedA = 107
 local seedB = 169
 local delay = 150
 
-local worldTake = "Savekubreak|abangku1"
-
--- Daftar world farm (Index) - Tambahkan sesukamu
-local worldFarmList = {
-  "njdoJ|abangku1",
+-- Tambahkan daftar world farm di sini
+local worldsFarm = {
+ "njdoJ|abangku1",
 "vujxB|abangku1",
 "vujxC|abangku1",
 "vujxG|abangku1",
 "vujxL|abangku1",
-}
+} 
+local worldTake = "Savekubreak|abangku1"
 
-local currentWorldIndex = 1
 local PING_LIMIT = 500
 --===============================
 
+local currentWorldIndex = 1
 
 -- ===== CEK PING =====
 function waitPingStable()
@@ -27,27 +26,11 @@ function waitPingStable()
     end
 end
 
-
 -- ===== POSISI TILE PLAYER =====
 function getPosTile()
     return math.floor(GetLocal().pos.x/32),
            math.floor(GetLocal().pos.y/32)
 end
-
-
--- ===== SMOOTH PATH (GERAK HALUS) =====
-function smoothPath(tx,ty)
-    local px,py = getPosTile()
-    while px ~= tx or py ~= ty do
-        if px < tx then px = px + 1
-        elseif px > tx then px = px - 1 end
-        if py < ty then py = py + 1
-        elseif py > ty then py = py - 1 end
-        FindPath(px,py,50)
-        Sleep(90)
-    end
-end
-
 
 -- ===== HADAP TILE =====
 function faceTile(x)
@@ -59,7 +42,6 @@ function faceTile(x)
     end
 end
 
-
 -- ===== INVENTORY =====
 function inv(id)
     for _, item in pairs(GetInventory()) do
@@ -70,17 +52,17 @@ function inv(id)
     return 0
 end
 
-
 -- ===== WARP =====
 function warp(world)
-    local target = world:upper()
-    while GetWorld().name ~= target do
-        LogToConsole("Warping ke: " .. target)
-        SendPacket(3,"action|join_request\nname|"..world)
-        Sleep(6000)
+    local nameOnly = world:upper():split("|")[1]
+    if GetWorld().name ~= nameOnly then
+        LogToConsole("Warping ke: " .. world)
+        while GetWorld().name ~= nameOnly do
+            SendPacket(3,"action|join_request\nname|"..world)
+            Sleep(6000)
+        end
     end
 end
-
 
 -- ===== CEK TILE SUDAH KE-PLACE =====
 function waitPlaced(x,y)
@@ -93,7 +75,6 @@ function waitPlaced(x,y)
     end
     return false
 end
-
 
 -- ===== PLACE =====
 function place(x,y,id)
@@ -111,8 +92,7 @@ function place(x,y,id)
     Sleep(50)
 end
 
-
--- ===== SPLICE (REVISI PATH) =====
+-- ===== SPLICE =====
 function splice(x,y)
     waitPingStable()
     local px,py = getPosTile()
@@ -132,7 +112,6 @@ function splice(x,y)
     end
 end
 
-
 -- ===== CEK TANAM =====
 function canPlant(x,y)
     local t = GetTile(x,y)
@@ -142,8 +121,7 @@ function canPlant(x,y)
     return b.fg ~= 0 and b.fg % 2 == 0 and b.fg ~= 6
 end
 
-
--- ===== FIND FLOATING TERDEKAT =====
+-- ===== FIND FLOATING =====
 function findNearestObject(id)
     local objs = GetObjectList()
     local best = 99999
@@ -163,7 +141,6 @@ function findNearestObject(id)
     return bx,by
 end
 
-
 -- ===== TAKE SEED =====
 function takeSeedID(id)
     waitPingStable()
@@ -176,7 +153,6 @@ function takeSeedID(id)
     end
 end
 
-
 -- ===== AMBIL SEED =====
 function ambilSeed()
     LogToConsole("Seed habis → ke TAKE")
@@ -187,13 +163,10 @@ function ambilSeed()
         if inv(seedB) == 0 then takeSeedID(seedB) end
         Sleep(300)
     end
-    LogToConsole("Seed dapat → balik FARM Index: " .. currentWorldIndex)
-    warp(worldFarmList[currentWorldIndex])
+    LogToConsole("Seed dapat → balik ke " .. worldsFarm[currentWorldIndex])
+    warp(worldsFarm[currentWorldIndex])
     Sleep(1000)
-    -- Setelah balik dari ambil seed, cek lagi sisaan di world tersebut
-    spliceLeftover()
 end
-
 
 function cekSeedSmart()
     if inv(seedA) == 0 or inv(seedB) == 0 then
@@ -201,15 +174,13 @@ function cekSeedSmart()
     end
 end
 
-
--- ===== SPLICE LEFTOVER =====
+-- ===== SPLICE LEFTOVER (MEMBERSIHKAN SISA) =====
 function spliceLeftover()
     local w = GetWorld()
-    LogToConsole("Scanning sisa seed (Leftover)...")
     for y = 0, w.height-1 do
         for x = 0, w.width-1 do
             local t = GetTile(x,y)
-            -- Cek jika ada seed yang sudah ter-place tapi belum ter-splice
+            -- Jika tile hanya berisi salah satu seed, lengkapi splice-nya
             if t and (t.fg == seedA or t.fg == seedB) then
                 splice(x,y)
             end
@@ -217,6 +188,18 @@ function spliceLeftover()
     end
 end
 
+-- ===== CEK FULL (SCAN CEPAT) =====
+function isWorldFull()
+    local w = GetWorld()
+    for y = 0, w.height-1 do
+        for x = 0, w.width-1 do
+            if canPlant(x,y) then
+                return false 
+            end
+        end
+    end
+    return true
+end
 
 -- ===== SPLICE PER ROW =====
 function spliceRow(y)
@@ -226,10 +209,6 @@ function spliceRow(y)
     local x = xs
     while (step==1 and x<=xe) or (step==-1 and x>=xe) do
         cekSeedSmart()
-        local t = GetTile(x,y)
-        if t and (t.fg == seedA or t.fg == seedB) then
-            splice(x,y)
-        end
         if canPlant(x,y) then
             splice(x,y)
         end
@@ -237,59 +216,47 @@ function spliceRow(y)
     end
 end
 
--- ===== SCAN ULANG WORLD =====
-function isWorldClear()
-    local w = GetWorld()
-    for y = 0, w.height-1 do
-        for x = 0, w.width-1 do
-            if canPlant(x,y) then return false end
-            local t = GetTile(x,y)
-            if t and (t.fg == seedA or t.fg == seedB) then return false end
-        end
-    end
-    return true
-end
-
-
--- ===== MAIN =====
+-- ===== MAIN THREAD =====
 RunThread(function()
-
     while true do
-        
-        local currentWorld = worldFarmList[currentWorldIndex]
-        warp(currentWorld)
+        local targetWorld = worldsFarm[currentWorldIndex]
+        warp(targetWorld)
         Sleep(2000)
 
-        LogToConsole("Memulai Farm di: " .. currentWorld)
+        LogToConsole("Memulai farm di: " .. targetWorld)
 
-        -- [NEW FEATURE] CEK SISAAN BEGITU JOIN WORLD
-        spliceLeftover()
-
-        -- Cycle Utama Tanam Per Baris
-        local w = GetWorld()
-        for y = 0, w.height-1 do
-            spliceRow(y)
-        end
-
-        -- Pastikan semua sisa (leftover) yang mungkin muncul belakangan tetap bersih
-        spliceLeftover()
-
-        -- Cek apakah world benar-benar clear sebelum pindah index
-        if isWorldClear() then
-            LogToConsole("World " .. currentWorld .. " SELESAI!")
-            currentWorldIndex = currentWorldIndex + 1
+        local worldDone = false
+        while not worldDone do
             
-            -- Jika semua world selesai, kembali ke Index 1
-            if currentWorldIndex > #worldFarmList then
-                LogToConsole("Semua World Index Selesai. Mengulang dari Index 1.")
-                currentWorldIndex = 1
+            -- 1. Pastikan seed ada
+            cekSeedSmart()
+            
+            -- 2. Bereskan sisa pohon yang nanggung
+            LogToConsole("Scanning sisa seed...")
+            spliceLeftover()
+            
+            -- 3. Scan utama per baris
+            local w = GetWorld()
+            for y = 0, w.height-1 do
+                spliceRow(y)
             end
-        else
-            LogToConsole("Masih ada sisa/pohon belum tumbuh di " .. currentWorld .. ". Scan ulang...")
-            -- Index tidak ditambah, jadi loop akan mengulang di world yang sama
+
+            -- 4. Final check sebelum pindah world
+            if isWorldFull() then
+                LogToConsole("World " .. targetWorld .. " sudah FULL.")
+                worldDone = true
+            else
+                LogToConsole("Masih ada yang kosong, mengulang...")
+            end
+            Sleep(1000)
         end
 
-        Sleep(1000)
+        -- Lanjut ke world berikutnya
+        currentWorldIndex = currentWorldIndex + 1
+        if currentWorldIndex > #worldsFarm then
+            LogToConsole("Semua world di list selesai! Mengulang dari awal.")
+            currentWorldIndex = 1
+            Sleep(5000) 
+        end
     end
-
 end)
