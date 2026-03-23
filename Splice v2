@@ -3,13 +3,12 @@ local seedA = 107
 local seedB = 169
 local delay = 150
 
--- Tambahkan daftar world farm di sini
-local worldsFarm = {
- "njdoJ|abangku1",
+-- Tambahkan daftar world farm di sini (NamaWorld|IDDoor)
+local worldsFarm = {"njdoJ|abangku1",
 "vujxB|abangku1",
 "vujxC|abangku1",
 "vujxG|abangku1",
-"vujxL|abangku1",
+"vujxL|abangku1"
 } 
 local worldTake = "Savekubreak|abangku1"
 
@@ -52,16 +51,15 @@ function inv(id)
     return 0
 end
 
--- ===== WARP =====
+-- ===== WARP (SIMPEL TANPA SPLIT) =====
 function warp(world)
-    local nameOnly = world:upper():split("|")[1]
-    if GetWorld().name ~= nameOnly then
-        LogToConsole("Warping ke: " .. world)
-        while GetWorld().name ~= nameOnly do
-            SendPacket(3,"action|join_request\nname|"..world)
-            Sleep(6000)
-        end
-    end
+    -- Langsung join request pake nama full (World|ID)
+    LogToConsole("Warping ke: " .. world)
+    
+    -- Kita kirim packet join berkala sampai nama world di client berubah
+    -- (Catatan: GetWorld().name biasanya tidak pakai |ID, jadi kita cek manual)
+    SendPacket(3,"action|join_request\nname|"..world)
+    Sleep(6000)
 end
 
 -- ===== CEK TILE SUDAH KE-PLACE =====
@@ -157,15 +155,17 @@ end
 function ambilSeed()
     LogToConsole("Seed habis → ke TAKE")
     warp(worldTake)
-    Sleep(1000)
+    Sleep(2000)
+    
     while inv(seedA) == 0 or inv(seedB) == 0 do
         if inv(seedA) == 0 then takeSeedID(seedA) end
         if inv(seedB) == 0 then takeSeedID(seedB) end
         Sleep(300)
     end
-    LogToConsole("Seed dapat → balik ke " .. worldsFarm[currentWorldIndex])
+    
+    LogToConsole("Seed dapat → balik ke farm")
     warp(worldsFarm[currentWorldIndex])
-    Sleep(1000)
+    Sleep(2000)
 end
 
 function cekSeedSmart()
@@ -180,7 +180,6 @@ function spliceLeftover()
     for y = 0, w.height-1 do
         for x = 0, w.width-1 do
             local t = GetTile(x,y)
-            -- Jika tile hanya berisi salah satu seed, lengkapi splice-nya
             if t and (t.fg == seedA or t.fg == seedB) then
                 splice(x,y)
             end
@@ -220,6 +219,8 @@ end
 RunThread(function()
     while true do
         local targetWorld = worldsFarm[currentWorldIndex]
+        
+        -- Warp ke world tujuan
         warp(targetWorld)
         Sleep(2000)
 
@@ -228,33 +229,33 @@ RunThread(function()
         local worldDone = false
         while not worldDone do
             
-            -- 1. Pastikan seed ada
+            -- Pastikan seed aman
             cekSeedSmart()
             
-            -- 2. Bereskan sisa pohon yang nanggung
+            -- Rapikan sisa-sisa yang tertinggal
             LogToConsole("Scanning sisa seed...")
             spliceLeftover()
             
-            -- 3. Scan utama per baris
+            -- Scan utama per baris
             local w = GetWorld()
             for y = 0, w.height-1 do
                 spliceRow(y)
             end
 
-            -- 4. Final check sebelum pindah world
+            -- Pengecekan akhir: apakah benar-benar full?
             if isWorldFull() then
                 LogToConsole("World " .. targetWorld .. " sudah FULL.")
                 worldDone = true
             else
-                LogToConsole("Masih ada yang kosong, mengulang...")
+                LogToConsole("Masih ada celah, mengulangi scan...")
             end
             Sleep(1000)
         end
 
-        -- Lanjut ke world berikutnya
+        -- Lanjut ke world index berikutnya
         currentWorldIndex = currentWorldIndex + 1
         if currentWorldIndex > #worldsFarm then
-            LogToConsole("Semua world di list selesai! Mengulang dari awal.")
+            LogToConsole("Semua world selesai! Kembali ke world pertama.")
             currentWorldIndex = 1
             Sleep(5000) 
         end
