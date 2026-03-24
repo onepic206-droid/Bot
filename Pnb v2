@@ -1,0 +1,303 @@
+-- =========================
+-- CONFIG
+-- =========================
+local WORLD_FARM = "njdoJ|abangku1"
+local WORLD_SAVE = "savekubreak|abangku1"
+
+local PNB_X = 8
+local PNB_Y = 1
+
+local DROP_X = 88
+local DROP_Y = 51
+
+local ID_BLOCK = 230
+local ID_SEED = 231
+
+local MAX_BLOCK = 200
+local MAX_SEED_DROP = 50
+
+local DELAY = 150
+
+-- AUTO COLLECT
+local COLLECT_RANGE = 5
+local COLLECT_DELAY = 120
+local COLLECT_ACTIVE = false
+
+-- =========================
+-- RANDOM OS + PING CHECK
+-- =========================
+math.randomseed(os.time())
+
+function randomDelay(base)
+    return base + math.random(50,200)
+end
+
+function waitPingStable()
+    while true do
+        local client = GetClient()
+        if client and client.ping and client.ping < 500 then
+            return
+        end
+        LogToConsole("`4Ping tinggi (".. (client and client.ping or "N/A") .."ms), menunggu stabil...")
+        Sleep(1000)
+    end
+end
+
+-- =========================
+-- HELPER
+-- =========================
+function joinWorld(world)
+    local worldName = world:match("([^|]+)")
+
+    if not GetWorld() then
+        RequestJoinWorld(world)
+        Sleep(randomDelay(4000))
+        return
+    end
+
+    if string.upper(GetWorld().name) ~= string.upper(worldName) then
+        RequestJoinWorld(world)
+        Sleep(randomDelay(4000))
+    end
+end
+
+function tileX()
+    return math.floor(GetLocal().pos.x / 32)
+end
+
+function tileY()
+    return math.floor(GetLocal().pos.y / 32)
+end
+
+function findPathTo(x,y)
+    if tileX() ~= x or tileY() ~= y then
+        FindPath(x,y)
+        Sleep(randomDelay(500))
+    end
+end
+
+function getItemCount(id)
+    for _, item in pairs(GetInventory()) do
+        if item.id == id then
+            return item.amount
+        end
+    end
+    return 0
+end
+
+-- =========================
+-- DROP FUNCTION
+-- =========================
+function dropItem(id, amt)
+    SendPacket(2,"action|drop\nitemID|"..id)
+    Sleep(randomDelay(200))
+
+    SendPacket(2,
+        "action|dialog_return\n"..
+        "dialog_name|drop_item\n"..
+        "itemID|"..id.."|\n"..
+        "count|"..amt
+    )
+end
+
+-- =========================
+-- AUTO COLLECT THREAD
+-- =========================
+RunThread(function()
+    while true do
+        if COLLECT_ACTIVE then
+            local me = GetLocal()
+            if me then
+                local px = tileX()
+                local py = tileY()
+
+                for _, obj in pairs(GetObjectList()) do
+                    local ox = math.floor(obj.pos.x / 32)
+                    local oy = math.floor(obj.pos.y / 32)
+
+                    if math.abs(px - ox) <= COLLECT_RANGE and
+                       math.abs(py - oy) <= COLLECT_RANGE then
+
+                        SendPacketRaw(false,{
+                            type = 11,
+                            value = obj.oid
+                        })
+
+                        Sleep(randomDelay(COLLECT_DELAY))
+                    end
+                end
+            end
+        end
+        Sleep(200)
+    end
+end)
+
+-- =========================
+-- HARVEST TREE
+-- =========================
+function harvestTree()
+
+    if getItemCount(ID_SEED) >= MAX_SEED_DROP then
+        return
+    end
+
+    COLLECT_ACTIVE = true
+    local world = GetWorld()
+    if not world then return end
+
+    for y = 0, world.height - 1 do
+        for x = 0, world.width - 1 do
+
+            waitPingStable()
+
+            if getItemCount(ID_SEED) >= MAX_SEED_DROP then
+                COLLECT_ACTIVE = false
+                return
+            end
+
+            local tile = GetTile(x,y)
+
+            if tile and tile.flags.tree and
+               tile.extra and tile.extra.progress >= 1 then
+
+                findPathTo(x,y)
+                Sleep(randomDelay(DELAY))
+
+                SendPacketRaw(false,{
+                    type = 3,
+                    value = 18,
+                    px = x,
+                    py = y,
+                    x = GetLocal().pos.x,
+                    y = GetLocal().pos.y
+                })
+
+                Sleep(randomDelay(DELAY))
+
+                if getItemCount(ID_BLOCK) >= MAX_BLOCK then
+                    COLLECT_ACTIVE = false
+                    return
+                end
+            end
+        end
+    end
+
+    COLLECT_ACTIVE = false
+end
+
+-- =========================
+-- PNB SYSTEM
+-- =========================
+function bbreak(x,y)
+    SendPacketRaw(false,{
+        type = 3,
+        value = 18,
+        px = x,
+        py = y,
+        x = GetLocal().pos.x,
+        y = GetLocal().pos.y
+    })
+    Sleep(randomDelay(130))
+end
+
+function put(x,y)
+    SendPacketRaw(false,{
+        type = 3,
+        value = ID_BLOCK,
+        px = x,
+        py = y,
+        x = GetLocal().pos.x,
+        y = GetLocal().pos.y
+    })
+    Sleep(randomDelay(100))
+end
+
+function doPNB()
+
+    if getItemCount(ID_BLOCK) <= 0 then
+        return
+    end
+
+    COLLECT_ACTIVE = true
+
+    findPathTo(PNB_X, PNB_Y)
+    Sleep(randomDelay(300))
+
+    while getItemCount(ID_BLOCK) > 0 do
+
+        waitPingStable()
+
+        if getItemCount(ID_SEED) >= MAX_SEED_DROP then
+            COLLECT_ACTIVE = false
+            return
+        end
+
+        local x = tileX()
+        local y = tileY() - 1
+
+        put(x-2,y)
+        put(x-1,y)
+        put(x,y)
+        put(x+1,y)
+        put(x+2,y)
+
+        while GetTile(x-2,y).fg ~= 0 do waitPingStable() bbreak(x-2,y) end
+        while GetTile(x-1,y).fg ~= 0 do waitPingStable() bbreak(x-1,y) end
+        while GetTile(x,y).fg ~= 0 do waitPingStable() bbreak(x,y) end
+        while GetTile(x+1,y).fg ~= 0 do waitPingStable() bbreak(x+1,y) end
+        while GetTile(x+2,y).fg ~= 0 do waitPingStable() bbreak(x+2,y) end
+
+        Sleep(randomDelay(DELAY))
+    end
+
+    COLLECT_ACTIVE = false
+end
+
+-- =========================
+-- DROP SEED
+-- =========================
+function dropSeed()
+
+    COLLECT_ACTIVE = false
+
+    joinWorld(WORLD_SAVE)
+    waitPingStable()
+
+    findPathTo(DROP_X, DROP_Y)
+    Sleep(randomDelay(500))
+
+    local count = getItemCount(ID_SEED)
+
+    if count > 0 then
+        dropItem(ID_SEED, count)
+        Sleep(randomDelay(1000))
+    end
+
+    joinWorld(WORLD_FARM)
+    Sleep(randomDelay(4000))
+end
+
+-- =========================
+-- MAIN LOOP
+-- =========================
+while true do
+
+    waitPingStable()
+
+    joinWorld(WORLD_FARM)
+    waitPingStable()
+
+    if getItemCount(ID_SEED) < MAX_SEED_DROP then
+        harvestTree()
+    end
+
+    waitPingStable()
+
+    if getItemCount(ID_SEED) >= MAX_SEED_DROP then
+        dropSeed()
+    else
+        doPNB()
+    end
+
+    Sleep(randomDelay(1000))
+end
