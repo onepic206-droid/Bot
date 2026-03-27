@@ -1,0 +1,390 @@
+--=========== CONFIG ===========
+local seedA = 111
+local seedB = 231
+local delay = 200
+
+local worldTake = "Savekubreak|abangku1"
+local worldFarm = "njdoj|abangku1"
+
+local PING_LIMIT = 500
+local WARP_DELAY = 6000
+local PATH_DELAY = 300
+local PLACE_DELAY = 250
+local TAKE_DELAY = 350
+local LOOP_DELAY = 300
+--===============================
+
+
+-- ===== PARSE WORLD|DOOR =====
+function parseWorld(str)
+    local world, door = str:match("([^|]+)|?(.*)")
+    return (world or ""):upper(), door or ""
+end
+
+
+-- ===== CEK PING =====
+function isPingStable()
+    local cl = GetClient()
+    return cl and cl.ping <= PING_LIMIT
+end
+
+function waitPingStable()
+    while true do
+        local cl = GetClient()
+        if cl and cl.ping <= PING_LIMIT then
+            break
+        end
+
+        local ping = cl and cl.ping or -1
+        LogToConsole("Ping tinggi (" .. ping .. ") -> tunggu stabil")
+        Sleep(500)
+    end
+end
+
+
+-- ===== POSISI TILE PLAYER =====
+function getPosTile()
+    return math.floor(GetLocal().pos.x / 32),
+           math.floor(GetLocal().pos.y / 32)
+end
+
+
+-- ===== HADAP TILE =====
+function faceTile(x)
+    local px = math.floor(GetLocal().pos.x / 32)
+
+    if x > px then
+        SendPacketRaw(false, {type = 0, state = 16})
+    elseif x < px then
+        SendPacketRaw(false, {type = 0, state = 48})
+    end
+end
+
+
+-- ===== INVENTORY =====
+function inv(id)
+    for _, item in pairs(GetInventory()) do
+        if item.id == id then
+            return item.amount
+        end
+    end
+    return 0
+end
+
+
+-- ===== WORLD CHECK =====
+function getCurrentWorldName()
+    local w = GetWorld()
+    if w and w.name then
+        return w.name:upper()
+    end
+    return ""
+end
+
+function isInWorld(target)
+    local world, _ = parseWorld(target)
+    return getCurrentWorldName() == world
+end
+
+
+-- ===== WARP =====
+function warp(target)
+    local world, door = parseWorld(target)
+    local current = getCurrentWorldName()
+
+    if current ~= world then
+        waitPingStable()
+
+        if door ~= "" then
+            SendPacket(3, "action|join_request\nname|" .. world .. "|" .. door .. "\ninvitedWorld|0")
+        else
+            RequestJoinWorld(world)
+        end
+
+        Sleep(WARP_DELAY)
+    end
+end
+
+
+-- ===== CEK TILE TERISI CEPAT =====
+function waitPlaced(x, y)
+    Sleep(PLACE_DELAY)
+    local t = GetTile(x, y)
+    return t and t.fg ~= 0
+end
+
+
+-- ===== PATH AMAN =====
+function safeFindPath(x, y, speed)
+    waitPingStable()
+    FindPath(x, y, speed or 400)
+    Sleep(PATH_DELAY)
+end
+
+
+-- ===== PLACE =====
+function place(x, y, id)
+    waitPingStable()
+
+    local me = GetLocal()
+    if not me then return false end
+
+    faceTile(x)
+    Sleep(50)
+
+    me = GetLocal()
+    if not me then return false end
+
+    local px = math.floor(me.pos.x / 32)
+    local state = 16
+
+    if x < px then
+        state = 48
+    else
+        state = 16
+    end
+
+    SendPacketRaw(false, {
+        type = 3,
+        state = state,
+        value = id,
+        px = x,
+        py = y,
+        x = me.pos.x,
+        y = me.pos.y
+    })
+
+    waitPlaced(x, y)
+    return true
+end
+
+
+-- ===== SPLICE =====
+function splice(x, y)
+    waitPingStable()
+
+    local px, py = getPosTile()
+
+    if px ~= x or py ~= y then
+        safeFindPath(x, y, 400)
+    end
+
+    waitPingStable()
+
+    local t = GetTile(x, y)
+    if not t then return false end
+
+    if t.fg == 0 then
+        if inv(seedA) > 0 then
+            place(x, y, seedA)
+            Sleep(delay)
+        end
+
+        waitPingStable()
+
+        if inv(seedB) > 0 then
+            place(x, y, seedB)
+            Sleep(delay)
+        end
+        return true
+    end
+
+    if t.fg == seedA or t.fg == seedB then
+        if inv(seedA) > 0 then
+            place(x, y, seedA)
+            Sleep(delay)
+        end
+
+        waitPingStable()
+
+        if inv(seedB) > 0 then
+            place(x, y, seedB)
+            Sleep(delay)
+        end
+        return true
+    end
+
+    return false
+end
+
+
+-- ===== CEK TANAM =====
+function canPlant(x, y)
+    local t = GetTile(x, y)
+    local b = GetTile(x, y + 1)
+
+    if not t or not b then return false end
+    if t.fg ~= 0 then return false end
+    if b.fg == 0 then return false end
+    if b.fg == 6 then return false end
+
+    return b.fg % 2 == 0
+end
+
+
+-- ===== FIND FLOATING TERDEKAT =====
+function findNearestObject(id)
+    local objs = GetObjectList()
+    local best = 999999
+    local bx, by = nil, nil
+
+    local me = GetLocal()
+    if not me then return nil, nil end
+
+    local px = me.pos.x
+    local py = me.pos.y
+
+    for _, obj in pairs(objs) do
+        if obj.id == id then
+            local dist = math.sqrt((obj.pos.x - px)^2 + (obj.pos.y - py)^2)
+
+            if dist < best then
+                best = dist
+                bx = math.floor(obj.pos.x / 32)
+                by = math.floor(obj.pos.y / 32)
+            end
+        end
+    end
+
+    return bx, by
+end
+
+
+-- ===== TAKE SEED FLOATING =====
+function takeSeedID(id)
+    waitPingStable()
+
+    local x, y = findNearestObject(id)
+
+    if x and y then
+        safeFindPath(x, y, 400)
+
+        waitPingStable()
+        SendPacket(2, "action|take")
+        Sleep(TAKE_DELAY)
+        return true
+    end
+
+    return false
+end
+
+
+-- ===== LEFTOVER CHECK LEBIH TEGAS =====
+function isHalfSpliceTile(x, y)
+    local t = GetTile(x, y)
+    return t and (t.fg == seedA or t.fg == seedB)
+end
+
+function spliceLeftover()
+    local w = GetWorld()
+    if not w then return end
+
+    for y = 0, w.height - 1 do
+        for x = 0, w.width - 1 do
+            waitPingStable()
+            cekSeedSmart()
+
+            if isHalfSpliceTile(x, y) then
+                safeFindPath(x, y, 400)
+                waitPingStable()
+
+                if isHalfSpliceTile(x, y) then
+                    splice(x, y)
+                    Sleep(80)
+                end
+            end
+        end
+    end
+end
+
+
+-- ===== AMBIL SEED =====
+function ambilSeed()
+    LogToConsole("Seed habis -> ke TAKE")
+
+    warp(worldTake)
+    Sleep(700)
+
+    while inv(seedA) == 0 or inv(seedB) == 0 do
+        waitPingStable()
+
+        if inv(seedA) == 0 then
+            takeSeedID(seedA)
+        end
+
+        waitPingStable()
+
+        if inv(seedB) == 0 then
+            takeSeedID(seedB)
+        end
+
+        Sleep(250)
+    end
+
+    LogToConsole("Seed dapat -> balik FARM")
+
+    warp(worldFarm)
+    Sleep(700)
+
+    spliceLeftover()
+end
+
+
+function cekSeedSmart()
+    if inv(seedA) == 0 or inv(seedB) == 0 then
+        ambilSeed()
+    end
+end
+
+
+-- ===== SPLICE PER ROW =====
+function spliceRow(y)
+    local w = GetWorld()
+    if not w then return end
+
+    local xs, xe, step = 0, w.width - 1, 1
+    if y % 2 == 1 then
+        xs, xe, step = w.width - 1, 0, -1
+    end
+
+    local x = xs
+
+    while (step == 1 and x <= xe) or (step == -1 and x >= xe) do
+        waitPingStable()
+        cekSeedSmart()
+
+        local t = GetTile(x, y)
+
+        if t and (t.fg == seedA or t.fg == seedB) then
+            splice(x, y)
+        elseif canPlant(x, y) then
+            splice(x, y)
+        end
+
+        x = x + step
+    end
+end
+
+
+-- ===== MAIN =====
+RunThread(function()
+    warp(worldFarm)
+    Sleep(1000)
+
+    while true do
+        waitPingStable()
+        cekSeedSmart()
+        spliceLeftover()
+
+        local w = GetWorld()
+        if w then
+            for y = 0, w.height - 1 do
+                waitPingStable()
+                spliceRow(y)
+            end
+        end
+
+        LogToConsole("1 cycle selesai -> ulangi")
+        Sleep(LOOP_DELAY)
+    end
+end)
