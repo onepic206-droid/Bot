@@ -1,15 +1,15 @@
 --=========== CONFIG ===========
 local seedA = 111
 local seedB = 231
-local delay = 180
+local delay = 200
 
 local worldTake = "savekubreak|abangku2"
 local worldFarm = "vujxb|abangku1"
 
 local PING_LIMIT = 500
 local WARP_DELAY = 7000
-local PATH_DELAY = 200
-local PLACE_DELAY = 180
+local PATH_DELAY = 300
+local PLACE_DELAY = 250
 local TAKE_DELAY = 350
 local LOOP_DELAY = 300
 --===============================
@@ -181,6 +181,28 @@ function waitPlaced(x, y)
 end
 
 
+-- ===== WAIT TILE CHANGE =====
+function waitTileChange(x, y, oldFg, maxTry)
+    local tries = 0
+    maxTry = maxTry or 10
+
+    while tries < maxTry do
+        waitPingStable()
+        Sleep(PLACE_DELAY)
+
+        local t = GetTile(x, y)
+        if t and t.fg ~= oldFg then
+            return true, t.fg
+        end
+
+        tries = tries + 1
+    end
+
+    local t = GetTile(x, y)
+    return false, (t and t.fg or 0)
+end
+
+
 -- ===== PLACE =====
 function place(x, y, id)
     waitPingStable()
@@ -189,7 +211,7 @@ function place(x, y, id)
     if not me then return false end
 
     faceTile(x)
-    Sleep(50)
+    Sleep(60)
     waitPingStable()
 
     me = GetLocal()
@@ -212,6 +234,46 @@ function place(x, y, id)
     })
 
     return waitPlaced(x, y)
+end
+
+
+-- ===== PLACE DENGAN RETRY =====
+function placeRetry(x, y, id, tries)
+    tries = tries or 3
+
+    for i = 1, tries do
+        waitPingStable()
+
+        local before = GetTile(x, y)
+        local beforeFg = before and before.fg or 0
+        local invBefore = inv(id)
+
+        if invBefore <= 0 then
+            return false
+        end
+
+        local ok = place(x, y, id)
+        Sleep(delay)
+
+        local after = GetTile(x, y)
+        local afterFg = after and after.fg or 0
+        local invAfter = inv(id)
+
+        if ok then
+            if afterFg ~= beforeFg then
+                return true
+            end
+
+            if invAfter < invBefore then
+                return true
+            end
+        end
+
+        LogToConsole("Place retry " .. i .. " gagal di " .. x .. "," .. y .. " item " .. id)
+        Sleep(150)
+    end
+
+    return false
 end
 
 
@@ -317,7 +379,7 @@ function takeSeedID(id)
 end
 
 
--- ===== SPLICE =====
+-- ===== SPLICE ROBUST =====
 function splice(x, y)
     if not inWorld(worldFarm) then
         warp(worldFarm)
@@ -345,36 +407,81 @@ function splice(x, y)
     local t = GetTile(x, y)
     if not t then return false end
 
+    -- tile kosong: place seedA dulu, lalu tunggu berubah, lalu place seedB
     if t.fg == 0 then
-        if inv(seedA) > 0 then
-            place(x, y, seedA)
-            Sleep(delay)
+        if inv(seedA) <= 0 or inv(seedB) <= 0 then
+            return false
+        end
+
+        local okA = placeRetry(x, y, seedA, 3)
+        if not okA then
+            LogToConsole("SeedA gagal ke-place di " .. x .. "," .. y)
+            return false
         end
 
         waitPingStable()
-        t = GetTile(x, y)
-        if not t then return false end
+        Sleep(delay)
 
-        if (t.fg == seedA or t.fg == seedB) and inv(seedB) > 0 then
-            place(x, y, seedB)
-            Sleep(delay)
+        local t2 = GetTile(x, y)
+        if not t2 then return false end
+
+        if t2.fg == seedA or t2.fg == seedB then
+            local oldFg = t2.fg
+            local okB = placeRetry(x, y, seedB, 4)
+
+            if not okB then
+                LogToConsole("SeedB gagal ke-place di " .. x .. "," .. y)
+                return false
+            end
+
+            local changed, newFg = waitTileChange(x, y, oldFg, 10)
+            if changed then
+                return true
+            end
+
+            local finalTile = GetTile(x, y)
+            if finalTile and finalTile.fg ~= seedA and finalTile.fg ~= seedB and finalTile.fg ~= 0 then
+                return true
+            end
+
+            LogToConsole("Miss splice di " .. x .. "," .. y .. " -> seedB tidak mengubah tile")
+            return false
         end
-        return true
+
+        return false
     end
 
+    -- kalau tile berisi salah satu seed, tinggal lengkapi
     if t.fg == seedA or t.fg == seedB then
-        if inv(seedA) > 0 then
-            place(x, y, seedA)
-            Sleep(delay)
+        local oldFg = t.fg
+        local needId = seedB
+
+        if t.fg == seedB then
+            needId = seedA
         end
 
-        waitPingStable()
-
-        if inv(seedB) > 0 then
-            place(x, y, seedB)
-            Sleep(delay)
+        if inv(needId) <= 0 then
+            return false
         end
-        return true
+
+        local ok = placeRetry(x, y, needId, 4)
+        if not ok then
+            LogToConsole("Pelengkap splice gagal di " .. x .. "," .. y)
+            return false
+        end
+
+        local changed, newFg = waitTileChange(x, y, oldFg, 10)
+        if changed then
+            return true
+        end
+
+        local finalTile = GetTile(x, y)
+        if finalTile and finalTile.fg ~= seedA and finalTile.fg ~= seedB and finalTile.fg ~= 0 then
+            return true
+        end
+
+        LogToConsole("Tile tetap seed setelah pelengkap splice di " .. x .. "," .. y)
+        return false
     end
 
     return false
