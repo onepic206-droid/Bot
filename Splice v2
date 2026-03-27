@@ -22,10 +22,49 @@ function parseWorld(str)
 end
 
 
+local FARM_WORLD, FARM_DOOR = parseWorld(worldFarm)
+local TAKE_WORLD, TAKE_DOOR = parseWorld(worldTake)
+
+
+-- ===== WORLD INFO =====
+function getWorldName()
+    local w = GetWorld()
+    return w and w.name and w.name:upper() or ""
+end
+
+function inWorld(target)
+    local world, _ = parseWorld(target)
+    return getWorldName() == world
+end
+
+
 -- ===== CEK PING =====
+function getPing()
+    local cl = GetClient()
+    if not cl then return 9999 end
+    return cl.ping or 9999
+end
+
 function waitPingStable()
-    while GetClient().ping > PING_LIMIT do
-        LogToConsole("Ping tinggi (" .. GetClient().ping .. ") -> menunggu")
+    local warned = false
+
+    while true do
+        local ping = getPing()
+
+        if ping <= PING_LIMIT then
+            if warned then
+                LogToConsole("Ping stabil lagi (" .. ping .. ")")
+            end
+            return true
+        end
+
+        if not warned then
+            LogToConsole("Ping tinggi (" .. ping .. ") -> menunggu stabil")
+            warned = true
+        else
+            LogToConsole("Masih lag (" .. ping .. ") -> hold")
+        end
+
         Sleep(500)
     end
 end
@@ -33,14 +72,18 @@ end
 
 -- ===== POSISI TILE PLAYER =====
 function getPosTile()
-    return math.floor(GetLocal().pos.x / 32),
-           math.floor(GetLocal().pos.y / 32)
+    local me = GetLocal()
+    if not me then return -1, -1 end
+    return math.floor(me.pos.x / 32), math.floor(me.pos.y / 32)
 end
 
 
 -- ===== HADAP TILE =====
 function faceTile(x)
-    local px = math.floor(GetLocal().pos.x / 32)
+    local me = GetLocal()
+    if not me then return end
+
+    local px = math.floor(me.pos.x / 32)
 
     if x > px then
         SendPacketRaw(false, {type = 0, state = 16})
@@ -63,44 +106,99 @@ end
 
 -- ===== WARP =====
 function warp(target)
-    local world, door = parseWorld(target)
-    local current = GetWorld() and GetWorld().name or ""
+    waitPingStable()
 
-    if current:upper() ~= world then
+    local world, door = parseWorld(target)
+    local current = getWorldName()
+
+    if current ~= world then
+        LogToConsole("Warp -> " .. world .. (door ~= "" and ("|" .. door) or ""))
+
         if door ~= "" then
             SendPacket(3, "action|join_request\nname|" .. world .. "|" .. door .. "\ninvitedWorld|0")
         else
             RequestJoinWorld(world)
         end
+
         Sleep(WARP_DELAY)
     end
+
+    local tries = 0
+    while getWorldName() ~= world and tries < 5 do
+        waitPingStable()
+        LogToConsole("Belum masuk " .. world .. " -> retry warp")
+
+        if door ~= "" then
+            SendPacket(3, "action|join_request\nname|" .. world .. "|" .. door .. "\ninvitedWorld|0")
+        else
+            RequestJoinWorld(world)
+        end
+
+        Sleep(WARP_DELAY)
+        tries = tries + 1
+    end
+
+    return getWorldName() == world
 end
 
 
--- ===== CEK TILE TERISI CEPAT =====
+-- ===== REJOIN WORLD =====
+function rejoinWorld(target)
+    local world, door = parseWorld(target)
+
+    LogToConsole("Rejoin -> " .. world .. (door ~= "" and ("|" .. door) or ""))
+
+    waitPingStable()
+
+    if door ~= "" then
+        SendPacket(3, "action|join_request\nname|" .. world .. "|" .. door .. "\ninvitedWorld|0")
+    else
+        RequestJoinWorld(world)
+    end
+
+    Sleep(WARP_DELAY)
+    return getWorldName() == world
+end
+
+
+-- ===== CEK TILE TERISI =====
 function waitPlaced(x, y)
-    Sleep(PLACE_DELAY)
-    local t = GetTile(x, y)
-    return t and t.fg ~= 0
+    local tries = 0
+
+    while tries < 8 do
+        waitPingStable()
+        Sleep(PLACE_DELAY)
+
+        local t = GetTile(x, y)
+        if t and t.fg ~= 0 then
+            return true
+        end
+
+        tries = tries + 1
+    end
+
+    return false
 end
 
 
 -- ===== PLACE =====
 function place(x, y, id)
     waitPingStable()
-    faceTile(x)
-    Sleep(50)
 
     local me = GetLocal()
     if not me then return false end
 
+    faceTile(x)
+    Sleep(50)
+    waitPingStable()
+
+    me = GetLocal()
+    if not me then return false end
+
     local px = math.floor(me.pos.x / 32)
     local state = 16
-
     if x < px then
         state = 48
-    else
-        state = 16
     end
 
     SendPacketRaw(false, {
@@ -113,48 +211,40 @@ function place(x, y, id)
         y = me.pos.y
     })
 
-    waitPlaced(x, y)
-    return true
+    return waitPlaced(x, y)
 end
 
 
--- ===== SPLICE =====
-function splice(x, y)
+-- ===== PATH AMAN + REJOIN JIKA GAGAL =====
+function safeFindPath(x, y, targetWorld)
+    waitPingStable()
+
+    if targetWorld and not inWorld(targetWorld) then
+        warp(targetWorld)
+        Sleep(800)
+    end
+
+    waitPingStable()
+    FindPath(x, y, 400)
+    Sleep(PATH_DELAY)
     waitPingStable()
 
     local px, py = getPosTile()
-
-    if px ~= x or py ~= y then
-        FindPath(x, y, 400)
-        Sleep(PATH_DELAY)
-    end
-
-    local t = GetTile(x, y)
-    if not t then return false end
-
-    if t.fg == 0 then
-        if inv(seedA) > 0 then
-            place(x, y, seedA)
-            Sleep(delay)
-        end
-
-        if inv(seedB) > 0 then
-            place(x, y, seedB)
-            Sleep(delay)
-        end
+    if px == x and py == y then
         return true
     end
 
-    if t.fg == seedA or t.fg == seedB then
-        if inv(seedA) > 0 then
-            place(x, y, seedA)
-            Sleep(delay)
-        end
+    LogToConsole("FindPath gagal ke " .. x .. "," .. y .. " -> rejoin world")
 
-        if inv(seedB) > 0 then
-            place(x, y, seedB)
-            Sleep(delay)
-        end
+    if targetWorld then
+        rejoinWorld(targetWorld)
+        Sleep(800)
+    end
+
+    waitPingStable()
+
+    px, py = getPosTile()
+    if px == x and py == y then
         return true
     end
 
@@ -179,11 +269,11 @@ end
 -- ===== FIND FLOATING TERDEKAT =====
 function findNearestObject(id)
     local objs = GetObjectList()
+    local me = GetLocal()
+    if not me or not objs then return nil, nil end
+
     local best = 999999
     local bx, by = nil, nil
-
-    local me = GetLocal()
-    if not me then return nil, nil end
 
     local px = me.pos.x
     local py = me.pos.y
@@ -209,10 +299,14 @@ function takeSeedID(id)
     waitPingStable()
 
     local x, y = findNearestObject(id)
-
     if x and y then
-        FindPath(x, y, 400)
+        local moved = safeFindPath(x, y, worldTake)
+        if not moved then
+            return false
+        end
+
         Sleep(150)
+        waitPingStable()
 
         SendPacket(2, "action|take")
         Sleep(TAKE_DELAY)
@@ -223,21 +317,67 @@ function takeSeedID(id)
 end
 
 
--- ===== SPLICE LEFTOVER =====
-function spliceLeftover()
-    local w = GetWorld()
-    if not w then return end
+-- ===== SPLICE =====
+function splice(x, y)
+    if not inWorld(worldFarm) then
+        warp(worldFarm)
+        Sleep(700)
+    end
 
-    for y = 0, w.height - 1 do
-        for x = 0, w.width - 1 do
-            local t = GetTile(x, y)
+    waitPingStable()
 
-            if t and (t.fg == seedA or t.fg == seedB) then
-                cekSeedSmart()
-                splice(x, y)
-            end
+    local px, py = getPosTile()
+    if px ~= x or py ~= y then
+        local moved = safeFindPath(x, y, worldFarm)
+        if not moved then
+            return false
+        end
+
+        px, py = getPosTile()
+        if px ~= x or py ~= y then
+            LogToConsole("Masih belum sampai target setelah rejoin: " .. x .. "," .. y)
+            return false
         end
     end
+
+    waitPingStable()
+
+    local t = GetTile(x, y)
+    if not t then return false end
+
+    if t.fg == 0 then
+        if inv(seedA) > 0 then
+            place(x, y, seedA)
+            Sleep(delay)
+        end
+
+        waitPingStable()
+        t = GetTile(x, y)
+        if not t then return false end
+
+        if (t.fg == seedA or t.fg == seedB) and inv(seedB) > 0 then
+            place(x, y, seedB)
+            Sleep(delay)
+        end
+        return true
+    end
+
+    if t.fg == seedA or t.fg == seedB then
+        if inv(seedA) > 0 then
+            place(x, y, seedA)
+            Sleep(delay)
+        end
+
+        waitPingStable()
+
+        if inv(seedB) > 0 then
+            place(x, y, seedB)
+            Sleep(delay)
+        end
+        return true
+    end
+
+    return false
 end
 
 
@@ -249,6 +389,13 @@ function ambilSeed()
     Sleep(700)
 
     while inv(seedA) == 0 or inv(seedB) == 0 do
+        waitPingStable()
+
+        if not inWorld(worldTake) then
+            warp(worldTake)
+            Sleep(700)
+        end
+
         if inv(seedA) == 0 then
             takeSeedID(seedA)
         end
@@ -263,8 +410,15 @@ function ambilSeed()
     LogToConsole("Seed dapat -> balik FARM")
 
     warp(worldFarm)
-    Sleep(700)
+    Sleep(1000)
 
+    while not inWorld(worldFarm) do
+        LogToConsole("Belum masuk FARM -> retry")
+        warp(worldFarm)
+        Sleep(1000)
+    end
+
+    waitPingStable()
     spliceLeftover()
 end
 
@@ -273,6 +427,56 @@ function cekSeedSmart()
     if inv(seedA) == 0 or inv(seedB) == 0 then
         ambilSeed()
     end
+end
+
+
+-- ===== SPLICE LEFTOVER =====
+function spliceLeftover()
+    if not inWorld(worldFarm) then
+        warp(worldFarm)
+        Sleep(700)
+    end
+
+    local w = GetWorld()
+    if not w then return false end
+
+    local found = false
+
+    for pass = 1, 3 do
+        local didSomething = false
+
+        for y = 0, w.height - 1 do
+            for x = 0, w.width - 1 do
+                waitPingStable()
+
+                if not inWorld(worldFarm) then
+                    warp(worldFarm)
+                    Sleep(700)
+                    w = GetWorld()
+                    if not w then return found end
+                end
+
+                local t = GetTile(x, y)
+                if t and (t.fg == seedA or t.fg == seedB) then
+                    cekSeedSmart()
+
+                    local t2 = GetTile(x, y)
+                    if t2 and (t2.fg == seedA or t2.fg == seedB) then
+                        if splice(x, y) then
+                            didSomething = true
+                            found = true
+                        end
+                    end
+                end
+            end
+        end
+
+        if not didSomething then
+            break
+        end
+    end
+
+    return found
 end
 
 
@@ -289,7 +493,13 @@ function spliceRow(y)
     local x = xs
 
     while (step == 1 and x <= xe) or (step == -1 and x >= xe) do
+        waitPingStable()
         cekSeedSmart()
+
+        if not inWorld(worldFarm) then
+            warp(worldFarm)
+            Sleep(700)
+        end
 
         local t = GetTile(x, y)
 
@@ -310,12 +520,26 @@ RunThread(function()
     Sleep(1000)
 
     while true do
+        waitPingStable()
+
+        if not inWorld(worldFarm) then
+            warp(worldFarm)
+            Sleep(1000)
+        end
+
         cekSeedSmart()
         spliceLeftover()
 
         local w = GetWorld()
         if w then
             for y = 0, w.height - 1 do
+                waitPingStable()
+
+                if not inWorld(worldFarm) then
+                    warp(worldFarm)
+                    Sleep(1000)
+                end
+
                 spliceRow(y)
             end
         end
