@@ -13,17 +13,8 @@ local PLACE_DELAY = 180
 local TAKE_DELAY = 350
 local LOOP_DELAY = 5000
 
-local PLACE_RANGE = 3
-local LEFTOVER_CHECK_INTERVAL = 180 -- 5 menit
+local PLANT_RANGE = 3
 --===============================
-
-
--- ===== TIMER =====
-local lastLeftoverCheck = 0
-
-function nowSec()
-    return os.time()
-end
 
 
 -- ===== PARSE WORLD|DOOR =====
@@ -105,7 +96,10 @@ end
 
 -- ===== INVENTORY =====
 function inv(id)
-    for _, item in pairs(GetInventory()) do
+    local items = GetInventory()
+    if not items then return 0 end
+
+    for _, item in pairs(items) do
         if item.id == id then
             return item.amount
         end
@@ -171,6 +165,130 @@ function rejoinWorld(target)
 end
 
 
+-- ===== VALIDASI TILE =====
+function isSolidTile(fg)
+    if fg == 0 then return false end
+    if fg == 6 then return false end
+    return fg % 2 == 0
+end
+
+function canPlant(x, y)
+    local t = GetTile(x, y)
+    local b = GetTile(x, y + 1)
+
+    if not t or not b then return false end
+    if t.fg ~= 0 then return false end
+    if not isSolidTile(b.fg) then return false end
+
+    return true
+end
+
+function canStandAt(x, y)
+    local t = GetTile(x, y)
+    local b = GetTile(x, y + 1)
+
+    if not t or not b then return false end
+    if t.fg ~= 0 then return false end
+    if b.fg == 0 then return false end
+
+    return true
+end
+
+function inPlantRangeFrom(px, py, tx, ty)
+    return math.abs(px - tx) <= PLANT_RANGE and math.abs(py - ty) <= PLANT_RANGE
+end
+
+function inPlantRange(tx, ty)
+    local px, py = getPosTile()
+    return inPlantRangeFrom(px, py, tx, ty)
+end
+
+
+-- ===== CARI TILE BERDIRI TERBAIK UNTUK PLACE TARGET =====
+function findStandTileForTarget(tx, ty)
+    local w = GetWorld()
+    if not w then return nil, nil end
+
+    local me = GetLocal()
+    if not me then return nil, nil end
+
+    local px = math.floor(me.pos.x / 32)
+    local py = math.floor(me.pos.y / 32)
+
+    local bestScore = 999999
+    local bestX, bestY = nil, nil
+
+    for y = math.max(0, ty - PLANT_RANGE), math.min(w.height - 2, ty + PLANT_RANGE) do
+        for x = math.max(0, tx - PLANT_RANGE), math.min(w.width - 1, tx + PLANT_RANGE) do
+            if not (x == tx and y == ty) then
+                if canStandAt(x, y) and inPlantRangeFrom(x, y, tx, ty) then
+                    local distPlayer = math.abs(px - x) + math.abs(py - y)
+                    local distTarget = math.abs(tx - x) + math.abs(ty - y)
+                    local score = distPlayer * 10 + distTarget
+
+                    if score < bestScore then
+                        bestScore = score
+                        bestX = x
+                        bestY = y
+                    end
+                end
+            end
+        end
+    end
+
+    return bestX, bestY
+end
+
+
+-- ===== PATH RANGE AMAN + REJOIN =====
+function safeMoveToPlantRange(tx, ty, targetWorld)
+    waitPingStable()
+
+    if targetWorld and not inWorld(targetWorld) then
+        warp(targetWorld)
+        Sleep(800)
+    end
+
+    if inPlantRange(tx, ty) then
+        return true
+    end
+
+    local sx, sy = findStandTileForTarget(tx, ty)
+    if not sx or not sy then
+        LogToConsole("Tidak ada spot berdiri valid untuk target " .. tx .. "," .. ty)
+        return false
+    end
+
+    FindPath(sx, sy, 400)
+    Sleep(PATH_DELAY)
+    waitPingStable()
+
+    if inPlantRange(tx, ty) then
+        return true
+    end
+
+    LogToConsole("FindPath range gagal ke target " .. tx .. "," .. ty .. " -> rejoin")
+
+    if targetWorld then
+        rejoinWorld(targetWorld)
+        Sleep(800)
+    end
+
+    waitPingStable()
+
+    if not inPlantRange(tx, ty) then
+        sx, sy = findStandTileForTarget(tx, ty)
+        if sx and sy then
+            FindPath(sx, sy, 400)
+            Sleep(PATH_DELAY)
+            waitPingStable()
+        end
+    end
+
+    return inPlantRange(tx, ty)
+end
+
+
 -- ===== CEK TILE TERISI =====
 function waitPlaced(x, y)
     local tries = 0
@@ -191,18 +309,14 @@ function waitPlaced(x, y)
 end
 
 
--- ===== RANGE =====
-function inPlaceRange(x, y)
-    local px, py = getPosTile()
-    if px == -1 or py == -1 then return false end
-
-    return math.abs(px - x) <= PLACE_RANGE and math.abs(py - y) <= PLACE_RANGE
-end
-
-
 -- ===== PLACE =====
 function place(x, y, id)
     waitPingStable()
+
+    if not inPlantRange(x, y) then
+        local moved = safeMoveToPlantRange(x, y, worldFarm)
+        if not moved then return false end
+    end
 
     local me = GetLocal()
     if not me then return false end
@@ -234,63 +348,15 @@ function place(x, y, id)
 end
 
 
--- ===== PATH AMAN + REJOIN JIKA GAGAL =====
-function safeFindPath(x, y, targetWorld)
-    waitPingStable()
-
-    if targetWorld and not inWorld(targetWorld) then
-        warp(targetWorld)
-        Sleep(800)
-    end
-
-    waitPingStable()
-    FindPath(x, y, 200)
-    Sleep(PATH_DELAY)
-    waitPingStable()
-
-    local px, py = getPosTile()
-    if px == x and py == y then
-        return true
-    end
-
-    LogToConsole("FindPath gagal ke " .. x .. "," .. y .. " -> rejoin world")
-
-    if targetWorld then
-        rejoinWorld(targetWorld)
-        Sleep(800)
-    end
-
-    waitPingStable()
-
-    px, py = getPosTile()
-    if px == x and py == y then
-        return true
-    end
-
-    return false
-end
-
-
--- ===== CEK TANAM =====
-function canPlant(x, y)
-    local t = GetTile(x, y)
-    local b = GetTile(x, y + 1)
-
-    if not t or not b then return false end
-    if t.fg ~= 0 then return false end
-    if b.fg == 0 then return false end
-    if b.fg == 6 then return false end
-
-    return b.fg % 2 == 0
-end
-
-
--- ===== TARGET PERLU SPLICE =====
-function needSplice(x, y)
+-- ===== STATUS TILE =====
+function isLeftoverTile(x, y)
     local t = GetTile(x, y)
     if not t then return false end
+    return t.fg == seedA or t.fg == seedB
+end
 
-    if t.fg == seedA or t.fg == seedB then
+function isIncompleteTile(x, y)
+    if isLeftoverTile(x, y) then
         return true
     end
 
@@ -302,39 +368,18 @@ function needSplice(x, y)
 end
 
 
--- ===== CARI TITIK PATH SESUAI RANGE PLACE =====
-function getReachPoint(tx, ty)
-    local me = GetLocal()
-    if not me then return tx, ty end
+-- ===== CEK BARIS MASIH PERLU DIPROSES =====
+function rowNeedsFix(y)
+    local w = GetWorld()
+    if not w then return false end
 
-    local px = math.floor(me.pos.x / 32)
-    local py = math.floor(me.pos.y / 32)
-
-    local bestDist = 999999
-    local bx, by = tx, ty
-
-    for y = ty - PLACE_RANGE, ty + PLACE_RANGE do
-        for x = tx - PLACE_RANGE, tx + PLACE_RANGE do
-            local t = GetTile(x, y)
-            local b = GetTile(x, y + 1)
-
-            if t and b then
-                if t.fg == 0 and b.fg ~= 0 and b.fg % 2 == 0 then
-                    if math.abs(x - tx) <= PLACE_RANGE and math.abs(y - ty) <= PLACE_RANGE then
-                        local dist = math.abs(px - x) + math.abs(py - y)
-
-                        if dist < bestDist then
-                            bestDist = dist
-                            bx = x
-                            by = y
-                        end
-                    end
-                end
-            end
+    for x = 0, w.width - 1 do
+        if isIncompleteTile(x, y) then
+            return true
         end
     end
 
-    return bx, by
+    return false
 end
 
 
@@ -372,7 +417,7 @@ function takeSeedID(id)
 
     local x, y = findNearestObject(id)
     if x and y then
-        local moved = safeFindPath(x, y, worldTake)
+        local moved = safeMoveToPlantRange(x, y, worldTake)
         if not moved then
             return false
         end
@@ -389,16 +434,35 @@ function takeSeedID(id)
 end
 
 
--- ===== SPLICE 1 TILE =====
-function spliceSingle(x, y)
+-- ===== SPLICE =====
+function splice(x, y)
+    if not inWorld(worldFarm) then
+        warp(worldFarm)
+        Sleep(700)
+    end
+
+    waitPingStable()
+
+    if not safeMoveToPlantRange(x, y, worldFarm) then
+        LogToConsole("Gagal masuk range splice: " .. x .. "," .. y)
+        return false
+    end
+
     waitPingStable()
 
     local t = GetTile(x, y)
     if not t then return false end
 
+    -- kosong valid -> place seedA lalu seedB
     if t.fg == 0 then
+        if not canPlant(x, y) then
+            return false
+        end
+
         if inv(seedA) > 0 then
-            place(x, y, seedA)
+            if not place(x, y, seedA) then
+                return false
+            end
             Sleep(delay)
         else
             return false
@@ -412,9 +476,11 @@ function spliceSingle(x, y)
             place(x, y, seedB)
             Sleep(delay)
         end
+
         return true
     end
 
+    -- kalau ada leftover seed, sempurnakan splice
     if t.fg == seedA or t.fg == seedB then
         if inv(seedA) > 0 then
             place(x, y, seedA)
@@ -427,73 +493,11 @@ function spliceSingle(x, y)
             place(x, y, seedB)
             Sleep(delay)
         end
+
         return true
     end
 
     return false
-end
-
-
--- ===== AUTO PLACE RANGE DI SEKITAR PLAYER =====
-function spliceAroundRange()
-    local px, py = getPosTile()
-    if px == -1 or py == -1 then return false end
-
-    local did = false
-
-    for ry = py - PLACE_RANGE, py + PLACE_RANGE do
-        for rx = px - PLACE_RANGE, px + PLACE_RANGE do
-            waitPingStable()
-
-            if not inWorld(worldFarm) then
-                return did
-            end
-
-            if needSplice(rx, ry) and inPlaceRange(rx, ry) then
-                cekSeedSmart()
-
-                local t = GetTile(rx, ry)
-                if t and (t.fg == 0 or t.fg == seedA or t.fg == seedB) then
-                    if spliceSingle(rx, ry) then
-                        did = true
-                    end
-                end
-            end
-        end
-    end
-
-    return did
-end
-
-
--- ===== SPLICE =====
-function splice(x, y)
-    if not inWorld(worldFarm) then
-        warp(worldFarm)
-        Sleep(700)
-    end
-
-    waitPingStable()
-
-    if inPlaceRange(x, y) then
-        return spliceSingle(x, y)
-    end
-
-    local rx, ry = getReachPoint(x, y)
-    local moved = safeFindPath(rx, ry, worldFarm)
-    if not moved then
-        return false
-    end
-
-    waitPingStable()
-
-    if not inPlaceRange(x, y) then
-        local px, py = getPosTile()
-        LogToConsole("Target belum masuk range dari " .. px .. "," .. py .. " ke " .. x .. "," .. y)
-        return false
-    end
-
-    return spliceSingle(x, y)
 end
 
 
@@ -538,7 +542,6 @@ function ambilSeed()
     spliceLeftover()
 end
 
-
 function cekSeedSmart()
     if inv(seedA) == 0 or inv(seedB) == 0 then
         ambilSeed()
@@ -546,7 +549,54 @@ function cekSeedSmart()
 end
 
 
--- ===== SPLICE LEFTOVER SMART =====
+-- ===== SPLICE LEFTOVER PER BARIS =====
+function processRowLeftover(y)
+    local w = GetWorld()
+    if not w then return false end
+
+    if not rowNeedsFix(y) then
+        return false
+    end
+
+    local didSomething = false
+    local xs, xe, step = 0, w.width - 1, 1
+
+    if y % 2 == 1 then
+        xs, xe, step = w.width - 1, 0, -1
+    end
+
+    local x = xs
+    while (step == 1 and x <= xe) or (step == -1 and x >= xe) do
+        waitPingStable()
+
+        if not inWorld(worldFarm) then
+            warp(worldFarm)
+            Sleep(700)
+        end
+
+        cekSeedSmart()
+
+        local t = GetTile(x, y)
+        if t then
+            if t.fg == seedA or t.fg == seedB then
+                if splice(x, y) then
+                    didSomething = true
+                end
+            elseif t.fg == 0 and canPlant(x, y) then
+                if splice(x, y) then
+                    didSomething = true
+                end
+            end
+        end
+
+        x = x + step
+    end
+
+    return didSomething
+end
+
+
+-- ===== SPLICE LEFTOVER =====
 function spliceLeftover()
     if not inWorld(worldFarm) then
         warp(worldFarm)
@@ -556,35 +606,26 @@ function spliceLeftover()
     local w = GetWorld()
     if not w then return false end
 
-    LogToConsole("Cek spliceLeftover...")
-
     local found = false
 
     for pass = 1, 3 do
         local didSomething = false
 
         for y = 0, w.height - 1 do
-            for x = 0, w.width - 1 do
-                waitPingStable()
+            waitPingStable()
 
-                if not inWorld(worldFarm) then
-                    warp(worldFarm)
-                    Sleep(700)
-                    w = GetWorld()
-                    if not w then return found end
-                end
+            if not inWorld(worldFarm) then
+                warp(worldFarm)
+                Sleep(700)
+                w = GetWorld()
+                if not w then return found end
+            end
 
-                if needSplice(x, y) then
-                    cekSeedSmart()
-
-                    local t = GetTile(x, y)
-                    if t and (t.fg == 0 or t.fg == seedA or t.fg == seedB) then
-                        if splice(x, y) then
-                            spliceAroundRange()
-                            didSomething = true
-                            found = true
-                        end
-                    end
+            if rowNeedsFix(y) then
+                LogToConsole("Fix row " .. y)
+                if processRowLeftover(y) then
+                    didSomething = true
+                    found = true
                 end
             end
         end
@@ -603,6 +644,10 @@ function spliceRow(y)
     local w = GetWorld()
     if not w then return end
 
+    if not rowNeedsFix(y) then
+        return
+    end
+
     local xs, xe, step = 0, w.width - 1, 1
     if y % 2 == 1 then
         xs, xe, step = w.width - 1, 0, -1
@@ -619,24 +664,15 @@ function spliceRow(y)
             Sleep(700)
         end
 
-        if needSplice(x, y) then
-            if splice(x, y) then
-                spliceAroundRange()
-            end
+        local t = GetTile(x, y)
+
+        if t and (t.fg == seedA or t.fg == seedB) then
+            splice(x, y)
+        elseif canPlant(x, y) then
+            splice(x, y)
         end
 
         x = x + step
-    end
-end
-
-
--- ===== CEK LEFTOVER TIMER =====
-function checkLeftoverTimer()
-    local now = nowSec()
-    if now - lastLeftoverCheck >= LEFTOVER_CHECK_INTERVAL then
-        lastLeftoverCheck = now
-        LogToConsole("Timer 5 menit -> jalankan spliceLeftover")
-        spliceLeftover()
     end
 end
 
@@ -645,8 +681,6 @@ end
 RunThread(function()
     warp(worldFarm)
     Sleep(1000)
-
-    lastLeftoverCheck = nowSec()
 
     while true do
         waitPingStable()
@@ -657,7 +691,7 @@ RunThread(function()
         end
 
         cekSeedSmart()
-        checkLeftoverTimer()
+        spliceLeftover()
 
         local w = GetWorld()
         if w then
@@ -669,12 +703,12 @@ RunThread(function()
                     Sleep(1000)
                 end
 
-                checkLeftoverTimer()
-                spliceRow(y)
+                if rowNeedsFix(y) then
+                    spliceRow(y)
+                end
             end
         end
 
-        checkLeftoverTimer()
         LogToConsole("1 cycle selesai -> ulangi")
         Sleep(LOOP_DELAY)
     end
