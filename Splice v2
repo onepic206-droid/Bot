@@ -4,17 +4,26 @@ local seedB = 231
 local delay = 180
 
 local worldTake = "savekubreak|abangku1"
-local worldFarm = "vujxc|abangku1"
+local worldFarm = "vujxg|abangku1"
 
 local PING_LIMIT = 500
 local WARP_DELAY = 7000
 local PATH_DELAY = 200
 local PLACE_DELAY = 180
 local TAKE_DELAY = 350
-local LOOP_DELAY = 1000
+local LOOP_DELAY = 5000
 
-local PLACE_RANGE = 2
+local PLACE_RANGE = 3                 -- auto place range
+local LEFTOVER_CHECK_INTERVAL = 180   -- 5 menit (detik)
 --===============================
+
+
+-- ===== TIMER =====
+local lastLeftoverCheck = 0
+
+function nowSec()
+    return os.time()
+end
 
 
 -- ===== PARSE WORLD|DOOR =====
@@ -79,49 +88,6 @@ function getPosTile()
 end
 
 
--- ===== CEK RANGE PLACE =====
-function inPlaceRange(tx, ty)
-    local px, py = getPosTile()
-    if px == -1 or py == -1 then return false end
-
-    return math.abs(px - tx) <= PLACE_RANGE and math.abs(py - ty) <= PLACE_RANGE
-end
-
-
--- ===== CARI TITIK PATH AGAR MASUK RANGE =====
-function getStandTileForPlace(tx, ty)
-    local w = GetWorld()
-    if not w then return tx, ty end
-
-    local px, py = getPosTile()
-    local bestX, bestY = tx, ty
-    local bestDist = 999999
-
-    for sy = ty - PLACE_RANGE, ty + PLACE_RANGE do
-        for sx = tx - PLACE_RANGE, tx + PLACE_RANGE do
-            if sx >= 0 and sy >= 0 and sx < w.width and sy < w.height then
-                local stand = GetTile(sx, sy)
-                local below = GetTile(sx, sy + 1)
-
-                if stand and below then
-                    local canStand = (stand.fg == 0) and (below.fg ~= 0)
-                    if canStand then
-                        local dist = math.abs(px - sx) + math.abs(py - sy)
-                        if dist < bestDist then
-                            bestDist = dist
-                            bestX = sx
-                            bestY = sy
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    return bestX, bestY
-end
-
-
 -- ===== HADAP TILE =====
 function faceTile(x)
     local me = GetLocal()
@@ -139,10 +105,7 @@ end
 
 -- ===== INVENTORY =====
 function inv(id)
-    local items = GetInventory()
-    if not items then return 0 end
-
-    for _, item in pairs(items) do
+    for _, item in pairs(GetInventory()) do
         if item.id == id then
             return item.amount
         end
@@ -228,6 +191,15 @@ function waitPlaced(x, y)
 end
 
 
+-- ===== RANGE =====
+function inPlaceRange(x, y)
+    local px, py = getPosTile()
+    if px == -1 or py == -1 then return false end
+
+    return math.abs(px - x) <= PLACE_RANGE and math.abs(py - y) <= PLACE_RANGE
+end
+
+
 -- ===== PLACE =====
 function place(x, y, id)
     waitPingStable()
@@ -262,6 +234,43 @@ function place(x, y, id)
 end
 
 
+-- ===== PATH AMAN + REJOIN JIKA GAGAL =====
+function safeFindPath(x, y, targetWorld)
+    waitPingStable()
+
+    if targetWorld and not inWorld(targetWorld) then
+        warp(targetWorld)
+        Sleep(800)
+    end
+
+    waitPingStable()
+    FindPath(x, y, 400)
+    Sleep(PATH_DELAY)
+    waitPingStable()
+
+    local px, py = getPosTile()
+    if px == x and py == y then
+        return true
+    end
+
+    LogToConsole("FindPath gagal ke " .. x .. "," .. y .. " -> rejoin world")
+
+    if targetWorld then
+        rejoinWorld(targetWorld)
+        Sleep(800)
+    end
+
+    waitPingStable()
+
+    px, py = getPosTile()
+    if px == x and py == y then
+        return true
+    end
+
+    return false
+end
+
+
 -- ===== CEK TANAM =====
 function canPlant(x, y)
     local t = GetTile(x, y)
@@ -276,6 +285,49 @@ function canPlant(x, y)
 end
 
 
+-- ===== TARGET PERLU SPLICE =====
+function needSplice(x, y)
+    local t = GetTile(x, y)
+    if not t then return false end
+
+    if t.fg == seedA or t.fg == seedB then
+        return true
+    end
+
+    if canPlant(x, y) then
+        return true
+    end
+
+    return false
+end
+
+
+-- ===== CARI TITIK PATH TERDEKAT UNTUK RANGE =====
+function getReachPoint(tx, ty)
+    local candidates = {
+        {tx, ty},
+        {tx - 1, ty}, {tx + 1, ty},
+        {tx, ty - 1}, {tx, ty + 1},
+        {tx - 1, ty - 1}, {tx + 1, ty - 1},
+        {tx - 1, ty + 1}, {tx + 1, ty + 1}
+    }
+
+    for _, p in pairs(candidates) do
+        local x, y = p[1], p[2]
+        local t = GetTile(x, y)
+        local b = GetTile(x, y + 1)
+
+        if t and b then
+            if t.fg == 0 and b.fg ~= 0 and b.fg % 2 == 0 then
+                return x, y
+            end
+        end
+    end
+
+    return tx, ty
+end
+
+
 -- ===== FIND FLOATING TERDEKAT =====
 function findNearestObject(id)
     local objs = GetObjectList()
@@ -284,12 +336,14 @@ function findNearestObject(id)
 
     local best = 999999
     local bx, by = nil, nil
+
     local px = me.pos.x
     local py = me.pos.y
 
     for _, obj in pairs(objs) do
         if obj.id == id then
             local dist = math.sqrt((obj.pos.x - px)^2 + (obj.pos.y - py)^2)
+
             if dist < best then
                 best = dist
                 bx = math.floor(obj.pos.x / 32)
@@ -302,103 +356,15 @@ function findNearestObject(id)
 end
 
 
--- ===== FORWARD DECLARATION =====
-function spliceLeftover()
-    return false
-end
-
-
--- ===== PATH AMAN + RANGE PLACE + LEFTOVER + 3X GAGAL REJOIN =====
-function safeFindPath(x, y, targetWorld)
-    local maxTry = 3
-    local attempt = 0
-
-    while attempt < maxTry do
-        waitPingStable()
-
-        if targetWorld and not inWorld(targetWorld) then
-            warp(targetWorld)
-            Sleep(800)
-        end
-
-        if inPlaceRange(x, y) then
-            return true
-        end
-
-        local pathX, pathY = getStandTileForPlace(x, y)
-
-        waitPingStable()
-        FindPath(pathX, pathY, 400)
-        Sleep(PATH_DELAY)
-        waitPingStable()
-
-        if inPlaceRange(x, y) then
-            return true
-        end
-
-        attempt = attempt + 1
-        LogToConsole("FindPath gagal ke range target " .. x .. "," .. y .. " (" .. attempt .. "/" .. maxTry .. ")")
-
-        if targetWorld == worldFarm then
-            local hadLeftover = spliceLeftover()
-            if hadLeftover then
-                LogToConsole("Ada spliceLeftover -> kerjakan dulu")
-            else
-                LogToConsole("Tidak ada spliceLeftover")
-            end
-            waitPingStable()
-        end
-
-        if attempt < maxTry then
-            Sleep(PATH_DELAY)
-        end
-    end
-
-    LogToConsole("FindPath gagal 3x -> rejoin world")
-
-    if targetWorld then
-        rejoinWorld(targetWorld)
-        Sleep(1000)
-    end
-
-    waitPingStable()
-
-    if targetWorld and not inWorld(targetWorld) then
-        warp(targetWorld)
-        Sleep(800)
-    end
-
-    if inPlaceRange(x, y) then
-        return true
-    end
-
-    local pathX, pathY = getStandTileForPlace(x, y)
-
-    waitPingStable()
-    FindPath(pathX, pathY, 400)
-    Sleep(PATH_DELAY)
-    waitPingStable()
-
-    if inPlaceRange(x, y) then
-        return true
-    end
-
-    LogToConsole("Masih gagal setelah rejoin ke range target " .. x .. "," .. y)
-    return false
-end
-
-
 -- ===== TAKE SEED FLOATING =====
 function takeSeedID(id)
     waitPingStable()
 
     local x, y = findNearestObject(id)
     if x and y then
-        if not inPlaceRange(x, y) then
-            local moved = safeFindPath(x, y, worldTake)
-            if not moved then
-                return false
-            end
+        local moved = safeFindPath(x, y, worldTake)
+        if not moved then
+            return false
         end
 
         Sleep(150)
@@ -413,27 +379,8 @@ function takeSeedID(id)
 end
 
 
--- ===== SPLICE =====
-function splice(x, y)
-    if not inWorld(worldFarm) then
-        warp(worldFarm)
-        Sleep(700)
-    end
-
-    waitPingStable()
-
-    if not inPlaceRange(x, y) then
-        local moved = safeFindPath(x, y, worldFarm)
-        if not moved then
-            return false
-        end
-
-        if not inPlaceRange(x, y) then
-            LogToConsole("Masih belum masuk range target: " .. x .. "," .. y)
-            return false
-        end
-    end
-
+-- ===== SPLICE 1 TILE =====
+function spliceSingle(x, y)
     waitPingStable()
 
     local t = GetTile(x, y)
@@ -443,6 +390,8 @@ function splice(x, y)
         if inv(seedA) > 0 then
             place(x, y, seedA)
             Sleep(delay)
+        else
+            return false
         end
 
         waitPingStable()
@@ -472,6 +421,69 @@ function splice(x, y)
     end
 
     return false
+end
+
+
+-- ===== AUTO PLACE RANGE DI SEKITAR PLAYER =====
+function spliceAroundRange()
+    local px, py = getPosTile()
+    if px == -1 or py == -1 then return false end
+
+    local did = false
+
+    for ry = py - PLACE_RANGE, py + PLACE_RANGE do
+        for rx = px - PLACE_RANGE, px + PLACE_RANGE do
+            waitPingStable()
+
+            if not inWorld(worldFarm) then
+                return did
+            end
+
+            if needSplice(rx, ry) and inPlaceRange(rx, ry) then
+                cekSeedSmart()
+
+                local t = GetTile(rx, ry)
+                if t and (t.fg == 0 or t.fg == seedA or t.fg == seedB) then
+                    if spliceSingle(rx, ry) then
+                        did = true
+                    end
+                end
+            end
+        end
+    end
+
+    return did
+end
+
+
+-- ===== SPLICE =====
+function splice(x, y)
+    if not inWorld(worldFarm) then
+        warp(worldFarm)
+        Sleep(700)
+    end
+
+    waitPingStable()
+
+    if inPlaceRange(x, y) then
+        return spliceSingle(x, y)
+    end
+
+    local rx, ry = getReachPoint(x, y)
+    local moved = safeFindPath(rx, ry, worldFarm)
+    if not moved then
+        return false
+    end
+
+    waitPingStable()
+
+    if not inPlaceRange(x, y) then
+        local px, py = getPosTile()
+        LogToConsole("Target belum masuk range dari " .. px .. "," .. py .. " ke " .. x .. "," .. y)
+        return false
+    end
+
+    return spliceSingle(x, y)
 end
 
 
@@ -524,7 +536,7 @@ function cekSeedSmart()
 end
 
 
--- ===== SPLICE LEFTOVER =====
+-- ===== SPLICE LEFTOVER SMART =====
 function spliceLeftover()
     if not inWorld(worldFarm) then
         warp(worldFarm)
@@ -533,6 +545,8 @@ function spliceLeftover()
 
     local w = GetWorld()
     if not w then return false end
+
+    LogToConsole("Cek spliceLeftover...")
 
     local found = false
 
@@ -550,13 +564,13 @@ function spliceLeftover()
                     if not w then return found end
                 end
 
-                local t = GetTile(x, y)
-                if t and (t.fg == seedA or t.fg == seedB) then
+                if needSplice(x, y) then
                     cekSeedSmart()
 
-                    local t2 = GetTile(x, y)
-                    if t2 and (t2.fg == seedA or t2.fg == seedB) then
+                    local t = GetTile(x, y)
+                    if t and (t.fg == 0 or t.fg == seedA or t.fg == seedB) then
                         if splice(x, y) then
+                            spliceAroundRange()
                             didSomething = true
                             found = true
                         end
@@ -595,15 +609,24 @@ function spliceRow(y)
             Sleep(700)
         end
 
-        local t = GetTile(x, y)
-
-        if t and (t.fg == seedA or t.fg == seedB) then
-            splice(x, y)
-        elseif canPlant(x, y) then
-            splice(x, y)
+        if needSplice(x, y) then
+            if splice(x, y) then
+                spliceAroundRange()
+            end
         end
 
         x = x + step
+    end
+end
+
+
+-- ===== CEK LEFTOVER TIMER =====
+function checkLeftoverTimer()
+    local now = nowSec()
+    if now - lastLeftoverCheck >= LEFTOVER_CHECK_INTERVAL then
+        lastLeftoverCheck = now
+        LogToConsole("Timer 5 menit -> jalankan spliceLeftover")
+        spliceLeftover()
     end
 end
 
@@ -612,6 +635,8 @@ end
 RunThread(function()
     warp(worldFarm)
     Sleep(1000)
+
+    lastLeftoverCheck = nowSec()
 
     while true do
         waitPingStable()
@@ -622,7 +647,7 @@ RunThread(function()
         end
 
         cekSeedSmart()
-        spliceLeftover()
+        checkLeftoverTimer()
 
         local w = GetWorld()
         if w then
@@ -634,10 +659,12 @@ RunThread(function()
                     Sleep(1000)
                 end
 
+                checkLeftoverTimer()
                 spliceRow(y)
             end
         end
 
+        checkLeftoverTimer()
         LogToConsole("1 cycle selesai -> ulangi")
         Sleep(LOOP_DELAY)
     end
