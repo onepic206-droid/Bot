@@ -1,17 +1,19 @@
 --=========== CONFIG ===========
 local seedA = 111
 local seedB = 231
-local delay = 200
+local delay = 180
 
-local worldTake = "savekubreak|abangku2"
-local worldFarm = "vujxb|abangku1"
+local worldTake = "savekubreak|abangku1"
+local worldFarm = "vujxc|abangku1"
 
 local PING_LIMIT = 500
 local WARP_DELAY = 7000
-local PATH_DELAY = 300
-local PLACE_DELAY = 250
+local PATH_DELAY = 200
+local PLACE_DELAY = 180
 local TAKE_DELAY = 350
 local LOOP_DELAY = 300
+
+local PLACE_RANGE = 4
 --===============================
 
 
@@ -20,7 +22,6 @@ function parseWorld(str)
     local world, door = str:match("([^|]+)|?(.*)")
     return (world or ""):upper(), door or ""
 end
-
 
 local FARM_WORLD, FARM_DOOR = parseWorld(worldFarm)
 local TAKE_WORLD, TAKE_DOOR = parseWorld(worldTake)
@@ -77,6 +78,13 @@ function getPosTile()
     return math.floor(me.pos.x / 32), math.floor(me.pos.y / 32)
 end
 
+function inPlaceRange(x, y)
+    local px, py = getPosTile()
+    local dx = math.abs(px - x)
+    local dy = math.abs(py - y)
+    return dx <= PLACE_RANGE and dy <= 1
+end
+
 
 -- ===== HADAP TILE =====
 function faceTile(x)
@@ -95,7 +103,10 @@ end
 
 -- ===== INVENTORY =====
 function inv(id)
-    for _, item in pairs(GetInventory()) do
+    local items = GetInventory()
+    if not items then return 0 end
+
+    for _, item in pairs(items) do
         if item.id == id then
             return item.amount
         end
@@ -138,7 +149,18 @@ function warp(target)
         tries = tries + 1
     end
 
-    return getWorldName() == world
+    if getWorldName() == world then
+        waitPingStable()
+
+        if world == FARM_WORLD then
+            LogToConsole("Masuk FARM -> cek leftover")
+            spliceLeftover()
+        end
+
+        return true
+    end
+
+    return false
 end
 
 
@@ -157,7 +179,19 @@ function rejoinWorld(target)
     end
 
     Sleep(WARP_DELAY)
-    return getWorldName() == world
+
+    if getWorldName() == world then
+        waitPingStable()
+
+        if world == FARM_WORLD then
+            LogToConsole("Rejoin FARM -> cek leftover")
+            spliceLeftover()
+        end
+
+        return true
+    end
+
+    return false
 end
 
 
@@ -181,28 +215,6 @@ function waitPlaced(x, y)
 end
 
 
--- ===== WAIT TILE CHANGE =====
-function waitTileChange(x, y, oldFg, maxTry)
-    local tries = 0
-    maxTry = maxTry or 10
-
-    while tries < maxTry do
-        waitPingStable()
-        Sleep(PLACE_DELAY)
-
-        local t = GetTile(x, y)
-        if t and t.fg ~= oldFg then
-            return true, t.fg
-        end
-
-        tries = tries + 1
-    end
-
-    local t = GetTile(x, y)
-    return false, (t and t.fg or 0)
-end
-
-
 -- ===== PLACE =====
 function place(x, y, id)
     waitPingStable()
@@ -211,7 +223,7 @@ function place(x, y, id)
     if not me then return false end
 
     faceTile(x)
-    Sleep(60)
+    Sleep(50)
     waitPingStable()
 
     me = GetLocal()
@@ -237,47 +249,55 @@ function place(x, y, id)
 end
 
 
--- ===== PLACE DENGAN RETRY =====
-function placeRetry(x, y, id, tries)
-    tries = tries or 3
+-- ===== CEK TILE VALID UNTUK BERDIRI =====
+function canStandAt(x, y)
+    local t = GetTile(x, y)
+    local b = GetTile(x, y + 1)
 
-    for i = 1, tries do
-        waitPingStable()
+    if not t or not b then return false end
+    if t.fg ~= 0 then return false end
+    if b.fg == 0 then return false end
 
-        local before = GetTile(x, y)
-        local beforeFg = before and before.fg or 0
-        local invBefore = inv(id)
-
-        if invBefore <= 0 then
-            return false
-        end
-
-        local ok = place(x, y, id)
-        Sleep(delay)
-
-        local after = GetTile(x, y)
-        local afterFg = after and after.fg or 0
-        local invAfter = inv(id)
-
-        if ok then
-            if afterFg ~= beforeFg then
-                return true
-            end
-
-            if invAfter < invBefore then
-                return true
-            end
-        end
-
-        LogToConsole("Place retry " .. i .. " gagal di " .. x .. "," .. y .. " item " .. id)
-        Sleep(150)
-    end
-
-    return false
+    return true
 end
 
 
--- ===== PATH AMAN + REJOIN JIKA GAGAL =====
+-- ===== CARI TILE BERDIRI SESUAI RANGE PLACE =====
+function getPlaceStandTile(tx, ty)
+    if inPlaceRange(tx, ty) then
+        local px, py = getPosTile()
+        return px, py
+    end
+
+    for dist = 1, PLACE_RANGE do
+        for dy = -1, 1 do
+            local leftX = tx - dist
+            local rightX = tx + dist
+            local sy = ty + dy
+
+            if canStandAt(leftX, sy) then
+                return leftX, sy
+            end
+
+            if canStandAt(rightX, sy) then
+                return rightX, sy
+            end
+        end
+    end
+
+    for sx = tx - PLACE_RANGE, tx + PLACE_RANGE do
+        for sy = ty - 1, ty + 1 do
+            if canStandAt(sx, sy) then
+                return sx, sy
+            end
+        end
+    end
+
+    return tx, ty
+end
+
+
+-- ===== PATH AMAN + MENYESUAIKAN RANGE =====
 function safeFindPath(x, y, targetWorld)
     waitPingStable()
 
@@ -286,17 +306,27 @@ function safeFindPath(x, y, targetWorld)
         Sleep(800)
     end
 
-    waitPingStable()
-    FindPath(x, y, 400)
-    Sleep(PATH_DELAY)
-    waitPingStable()
-
-    local px, py = getPosTile()
-    if px == x and py == y then
+    if inPlaceRange(x, y) then
         return true
     end
 
-    LogToConsole("FindPath gagal ke " .. x .. "," .. y .. " -> rejoin world")
+    local standX, standY = getPlaceStandTile(x, y)
+
+    waitPingStable()
+    FindPath(standX, standY, 400)
+    Sleep(PATH_DELAY)
+    waitPingStable()
+
+    if inPlaceRange(x, y) then
+        return true
+    end
+
+    local px, py = getPosTile()
+    if px == standX and py == standY then
+        return true
+    end
+
+    LogToConsole("FindPath gagal ke range target " .. x .. "," .. y .. " -> rejoin world")
 
     if targetWorld then
         rejoinWorld(targetWorld)
@@ -305,8 +335,22 @@ function safeFindPath(x, y, targetWorld)
 
     waitPingStable()
 
+    if inPlaceRange(x, y) then
+        return true
+    end
+
+    standX, standY = getPlaceStandTile(x, y)
+
+    FindPath(standX, standY, 400)
+    Sleep(PATH_DELAY)
+    waitPingStable()
+
+    if inPlaceRange(x, y) then
+        return true
+    end
+
     px, py = getPosTile()
-    if px == x and py == y then
+    if px == standX and py == standY then
         return true
     end
 
@@ -325,6 +369,23 @@ function canPlant(x, y)
     if b.fg == 6 then return false end
 
     return b.fg % 2 == 0
+end
+
+
+-- ===== TILE PERLU DITANGANI =====
+function needHandleTile(x, y)
+    local t = GetTile(x, y)
+    if not t then return false end
+
+    if t.fg == seedA or t.fg == seedB then
+        return true
+    end
+
+    if canPlant(x, y) then
+        return true
+    end
+
+    return false
 end
 
 
@@ -379,7 +440,7 @@ function takeSeedID(id)
 end
 
 
--- ===== SPLICE ROBUST =====
+-- ===== SPLICE =====
 function splice(x, y)
     if not inWorld(worldFarm) then
         warp(worldFarm)
@@ -388,18 +449,16 @@ function splice(x, y)
 
     waitPingStable()
 
-    local px, py = getPosTile()
-    if px ~= x or py ~= y then
+    if not inPlaceRange(x, y) then
         local moved = safeFindPath(x, y, worldFarm)
         if not moved then
             return false
         end
+    end
 
-        px, py = getPosTile()
-        if px ~= x or py ~= y then
-            LogToConsole("Masih belum sampai target setelah rejoin: " .. x .. "," .. y)
-            return false
-        end
+    if not inPlaceRange(x, y) then
+        LogToConsole("Masih di luar place range target: " .. x .. "," .. y)
+        return false
     end
 
     waitPingStable()
@@ -407,81 +466,40 @@ function splice(x, y)
     local t = GetTile(x, y)
     if not t then return false end
 
-    -- tile kosong: place seedA dulu, lalu tunggu berubah, lalu place seedB
     if t.fg == 0 then
-        if inv(seedA) <= 0 or inv(seedB) <= 0 then
-            return false
-        end
-
-        local okA = placeRetry(x, y, seedA, 3)
-        if not okA then
-            LogToConsole("SeedA gagal ke-place di " .. x .. "," .. y)
-            return false
+        if inv(seedA) > 0 then
+            if not place(x, y, seedA) then
+                return false
+            end
+            Sleep(delay)
         end
 
         waitPingStable()
-        Sleep(delay)
+        t = GetTile(x, y)
+        if not t then return false end
 
-        local t2 = GetTile(x, y)
-        if not t2 then return false end
-
-        if t2.fg == seedA or t2.fg == seedB then
-            local oldFg = t2.fg
-            local okB = placeRetry(x, y, seedB, 4)
-
-            if not okB then
-                LogToConsole("SeedB gagal ke-place di " .. x .. "," .. y)
+        if (t.fg == seedA or t.fg == seedB) and inv(seedB) > 0 then
+            if not place(x, y, seedB) then
                 return false
             end
-
-            local changed, newFg = waitTileChange(x, y, oldFg, 10)
-            if changed then
-                return true
-            end
-
-            local finalTile = GetTile(x, y)
-            if finalTile and finalTile.fg ~= seedA and finalTile.fg ~= seedB and finalTile.fg ~= 0 then
-                return true
-            end
-
-            LogToConsole("Miss splice di " .. x .. "," .. y .. " -> seedB tidak mengubah tile")
-            return false
+            Sleep(delay)
         end
-
-        return false
+        return true
     end
 
-    -- kalau tile berisi salah satu seed, tinggal lengkapi
     if t.fg == seedA or t.fg == seedB then
-        local oldFg = t.fg
-        local needId = seedB
-
-        if t.fg == seedB then
-            needId = seedA
+        if inv(seedA) > 0 then
+            place(x, y, seedA)
+            Sleep(delay)
         end
 
-        if inv(needId) <= 0 then
-            return false
-        end
+        waitPingStable()
 
-        local ok = placeRetry(x, y, needId, 4)
-        if not ok then
-            LogToConsole("Pelengkap splice gagal di " .. x .. "," .. y)
-            return false
+        if inv(seedB) > 0 then
+            place(x, y, seedB)
+            Sleep(delay)
         end
-
-        local changed, newFg = waitTileChange(x, y, oldFg, 10)
-        if changed then
-            return true
-        end
-
-        local finalTile = GetTile(x, y)
-        if finalTile and finalTile.fg ~= seedA and finalTile.fg ~= seedB and finalTile.fg ~= 0 then
-            return true
-        end
-
-        LogToConsole("Tile tetap seed setelah pelengkap splice di " .. x .. "," .. y)
-        return false
+        return true
     end
 
     return false
@@ -563,12 +581,11 @@ function spliceLeftover()
                     if not w then return found end
                 end
 
-                local t = GetTile(x, y)
-                if t and (t.fg == seedA or t.fg == seedB) then
+                if needHandleTile(x, y) then
                     cekSeedSmart()
 
                     local t2 = GetTile(x, y)
-                    if t2 and (t2.fg == seedA or t2.fg == seedB) then
+                    if t2 and needHandleTile(x, y) then
                         if splice(x, y) then
                             didSomething = true
                             found = true
@@ -606,13 +623,10 @@ function spliceRow(y)
         if not inWorld(worldFarm) then
             warp(worldFarm)
             Sleep(700)
+            spliceLeftover()
         end
 
-        local t = GetTile(x, y)
-
-        if t and (t.fg == seedA or t.fg == seedB) then
-            splice(x, y)
-        elseif canPlant(x, y) then
+        if needHandleTile(x, y) then
             splice(x, y)
         end
 
@@ -632,6 +646,7 @@ RunThread(function()
         if not inWorld(worldFarm) then
             warp(worldFarm)
             Sleep(1000)
+            spliceLeftover()
         end
 
         cekSeedSmart()
@@ -645,6 +660,7 @@ RunThread(function()
                 if not inWorld(worldFarm) then
                     warp(worldFarm)
                     Sleep(1000)
+                    spliceLeftover()
                 end
 
                 spliceRow(y)
