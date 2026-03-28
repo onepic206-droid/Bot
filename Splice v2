@@ -13,8 +13,8 @@ local PLACE_DELAY = 180
 local TAKE_DELAY = 350
 local LOOP_DELAY = 5000
 
-local PLACE_RANGE = 3                 -- auto place range
-local LEFTOVER_CHECK_INTERVAL = 180   -- 5 menit (detik)
+local PLACE_RANGE = 3
+local LEFTOVER_CHECK_INTERVAL = 180 -- 5 menit
 --===============================
 
 
@@ -244,7 +244,7 @@ function safeFindPath(x, y, targetWorld)
     end
 
     waitPingStable()
-    FindPath(x, y, 400)
+    FindPath(x, y, 200)
     Sleep(PATH_DELAY)
     waitPingStable()
 
@@ -302,29 +302,39 @@ function needSplice(x, y)
 end
 
 
--- ===== CARI TITIK PATH TERDEKAT UNTUK RANGE =====
+-- ===== CARI TITIK PATH SESUAI RANGE PLACE =====
 function getReachPoint(tx, ty)
-    local candidates = {
-        {tx, ty},
-        {tx - 1, ty}, {tx + 1, ty},
-        {tx, ty - 1}, {tx, ty + 1},
-        {tx - 1, ty - 1}, {tx + 1, ty - 1},
-        {tx - 1, ty + 1}, {tx + 1, ty + 1}
-    }
+    local me = GetLocal()
+    if not me then return tx, ty end
 
-    for _, p in pairs(candidates) do
-        local x, y = p[1], p[2]
-        local t = GetTile(x, y)
-        local b = GetTile(x, y + 1)
+    local px = math.floor(me.pos.x / 32)
+    local py = math.floor(me.pos.y / 32)
 
-        if t and b then
-            if t.fg == 0 and b.fg ~= 0 and b.fg % 2 == 0 then
-                return x, y
+    local bestDist = 999999
+    local bx, by = tx, ty
+
+    for y = ty - PLACE_RANGE, ty + PLACE_RANGE do
+        for x = tx - PLACE_RANGE, tx + PLACE_RANGE do
+            local t = GetTile(x, y)
+            local b = GetTile(x, y + 1)
+
+            if t and b then
+                if t.fg == 0 and b.fg ~= 0 and b.fg % 2 == 0 then
+                    if math.abs(x - tx) <= PLACE_RANGE and math.abs(y - ty) <= PLACE_RANGE then
+                        local dist = math.abs(px - x) + math.abs(py - y)
+
+                        if dist < bestDist then
+                            bestDist = dist
+                            bx = x
+                            by = y
+                        end
+                    end
+                end
             end
         end
     end
 
-    return tx, ty
+    return bx, by
 end
 
 
