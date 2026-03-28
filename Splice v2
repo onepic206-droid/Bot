@@ -17,8 +17,8 @@ local PLACE_RANGE = 3
 local LEFTOVER_INTERVAL = 180000 -- 3 menit
 --===============================
 
--- ===== TIMER =====
 local lastLeftoverCheck = 0
+local runningLeftover = false
 
 -- ===== PARSE WORLD|DOOR =====
 function parseWorld(str)
@@ -102,62 +102,7 @@ function inv(id)
     return 0
 end
 
--- ===== WARP =====
-function warp(target)
-    waitPingStable()
-
-    local world, door = parseWorld(target)
-    local current = getWorldName()
-
-    if current ~= world then
-        LogToConsole("Warp -> " .. world .. (door ~= "" and ("|" .. door) or ""))
-
-        if door ~= "" then
-            SendPacket(3, "action|join_request\nname|" .. world .. "|" .. door .. "\ninvitedWorld|0")
-        else
-            RequestJoinWorld(world)
-        end
-
-        Sleep(WARP_DELAY)
-    end
-
-    local tries = 0
-    while getWorldName() ~= world and tries < 5 do
-        waitPingStable()
-        LogToConsole("Belum masuk " .. world .. " -> retry warp")
-
-        if door ~= "" then
-            SendPacket(3, "action|join_request\nname|" .. world .. "|" .. door .. "\ninvitedWorld|0")
-        else
-            RequestJoinWorld(world)
-        end
-
-        Sleep(WARP_DELAY)
-        tries = tries + 1
-    end
-
-    return getWorldName() == world
-end
-
--- ===== REJOIN WORLD =====
-function rejoinWorld(target)
-    local world, door = parseWorld(target)
-
-    LogToConsole("Rejoin -> " .. world .. (door ~= "" and ("|" .. door) or ""))
-
-    waitPingStable()
-
-    if door ~= "" then
-        SendPacket(3, "action|join_request\nname|" .. world .. "|" .. door .. "\ninvitedWorld|0")
-    else
-        RequestJoinWorld(world)
-    end
-
-    Sleep(WARP_DELAY)
-    return getWorldName() == world
-end
-
--- ===== CEK TILE =====
+-- ===== TILE CHECK =====
 function isSolidForPlant(fg)
     if fg == 0 then return false end
     if fg == 6 then return false end
@@ -175,16 +120,6 @@ function canPlant(x, y)
     return true
 end
 
-function isHalfSpliceTile(x, y)
-    local t = GetTile(x, y)
-    if not t then return false end
-    return t.fg == seedA or t.fg == seedB
-end
-
-function isTargetNeedSplice(x, y)
-    return canPlant(x, y) or isHalfSpliceTile(x, y)
-end
-
 function canStandAt(x, y)
     local t = GetTile(x, y)
     local b = GetTile(x, y + 1)
@@ -192,10 +127,11 @@ function canStandAt(x, y)
     if not t or not b then return false end
     if t.fg ~= 0 then return false end
     if b.fg == 0 then return false end
+
     return true
 end
 
--- ===== CEK RANGE PLACE =====
+-- ===== RANGE PLACE =====
 function inPlaceRange(x, y)
     local px, py = getPosTile()
     if px == -1 then return false end
@@ -234,7 +170,6 @@ function getBestStandTile(tx, ty)
     return best
 end
 
--- ===== WAIT TILE BERUBAH =====
 function waitPlacedOrChanged(x, y, oldFg)
     local tries = 0
 
@@ -253,12 +188,93 @@ function waitPlacedOrChanged(x, y, oldFg)
     return false
 end
 
--- ===== PATH AMAN =====
+function shouldRunLeftover()
+    local now = os.time() * 1000
+    if lastLeftoverCheck == 0 then
+        return true
+    end
+    return (now - lastLeftoverCheck) >= LEFTOVER_INTERVAL
+end
+
+-- forward declaration
+function spliceLeftover() end
+
+-- ===== WARP =====
+function warp(target, runLeftoverAfterJoin)
+    waitPingStable()
+
+    local world, door = parseWorld(target)
+    local current = getWorldName()
+
+    if current ~= world then
+        LogToConsole("Warp -> " .. world .. (door ~= "" and ("|" .. door) or ""))
+
+        if door ~= "" then
+            SendPacket(3, "action|join_request\nname|" .. world .. "|" .. door .. "\ninvitedWorld|0")
+        else
+            RequestJoinWorld(world)
+        end
+
+        Sleep(WARP_DELAY)
+    end
+
+    local tries = 0
+    while getWorldName() ~= world and tries < 5 do
+        waitPingStable()
+        LogToConsole("Belum masuk " .. world .. " -> retry warp")
+
+        if door ~= "" then
+            SendPacket(3, "action|join_request\nname|" .. world .. "|" .. door .. "\ninvitedWorld|0")
+        else
+            RequestJoinWorld(world)
+        end
+
+        Sleep(WARP_DELAY)
+        tries = tries + 1
+    end
+
+    local ok = getWorldName() == world
+
+    if ok and runLeftoverAfterJoin and world == FARM_WORLD and not runningLeftover then
+        Sleep(700)
+        spliceLeftover()
+    end
+
+    return ok
+end
+
+-- ===== REJOIN =====
+function rejoinWorld(target, runLeftoverAfterJoin)
+    local world, door = parseWorld(target)
+
+    LogToConsole("Rejoin -> " .. world .. (door ~= "" and ("|" .. door) or ""))
+
+    waitPingStable()
+
+    if door ~= "" then
+        SendPacket(3, "action|join_request\nname|" .. world .. "|" .. door .. "\ninvitedWorld|0")
+    else
+        RequestJoinWorld(world)
+    end
+
+    Sleep(WARP_DELAY)
+
+    local ok = getWorldName() == world
+
+    if ok and runLeftoverAfterJoin and world == FARM_WORLD and not runningLeftover then
+        Sleep(700)
+        spliceLeftover()
+    end
+
+    return ok
+end
+
+-- ===== PATH =====
 function safeFindPath(x, y, targetWorld)
     waitPingStable()
 
     if targetWorld and not inWorld(targetWorld) then
-        warp(targetWorld)
+        warp(targetWorld, true)
         Sleep(800)
     end
 
@@ -275,7 +291,7 @@ function safeFindPath(x, y, targetWorld)
     LogToConsole("FindPath gagal ke " .. x .. "," .. y .. " -> rejoin world")
 
     if targetWorld then
-        rejoinWorld(targetWorld)
+        rejoinWorld(targetWorld, true)
         Sleep(800)
     end
 
@@ -347,7 +363,7 @@ function place(x, y, id)
     return waitPlacedOrChanged(x, y, oldFg)
 end
 
--- ===== FIND FLOATING TERDEKAT =====
+-- ===== FLOATING OBJECT =====
 function findNearestObject(id)
     local objs = GetObjectList()
     local me = GetLocal()
@@ -374,7 +390,6 @@ function findNearestObject(id)
     return bx, by
 end
 
--- ===== TAKE SEED FLOATING =====
 function takeSeedID(id)
     waitPingStable()
 
@@ -387,7 +402,6 @@ function takeSeedID(id)
 
         Sleep(150)
         waitPingStable()
-
         SendPacket(2, "action|take")
         Sleep(TAKE_DELAY)
         return true
@@ -396,10 +410,10 @@ function takeSeedID(id)
     return false
 end
 
--- ===== SPLICE SATU TILE =====
+-- ===== SPLICE =====
 function splice(x, y)
     if not inWorld(worldFarm) then
-        warp(worldFarm)
+        warp(worldFarm, true)
         Sleep(700)
     end
 
@@ -413,18 +427,14 @@ function splice(x, y)
     local t = GetTile(x, y)
     if not t then return false end
 
-    -- tile kosong valid -> place seedA lalu seedB
     if t.fg == 0 then
         if not canPlant(x, y) then
             return false
         end
 
-        if inv(seedA) > 0 then
-            place(x, y, seedA)
-            Sleep(delay)
-        else
-            return false
-        end
+        if inv(seedA) <= 0 then return false end
+        place(x, y, seedA)
+        Sleep(delay)
 
         waitPingStable()
         t = GetTile(x, y)
@@ -439,21 +449,18 @@ function splice(x, y)
         return t.fg ~= 0
     end
 
-    -- tile setengah splice
-    if t.fg == seedA or t.fg == seedB then
-        local before = t.fg
+    if t.fg == seedA then
+        if inv(seedB) <= 0 then return false end
+        place(x, y, seedB)
+        Sleep(delay)
+        return true
+    end
 
-        if before == seedA then
-            if inv(seedB) <= 0 then return false end
-            place(x, y, seedB)
-            Sleep(delay)
-            return true
-        elseif before == seedB then
-            if inv(seedA) <= 0 then return false end
-            place(x, y, seedA)
-            Sleep(delay)
-            return true
-        end
+    if t.fg == seedB then
+        if inv(seedA) <= 0 then return false end
+        place(x, y, seedA)
+        Sleep(delay)
+        return true
     end
 
     return false
@@ -463,14 +470,14 @@ end
 function ambilSeed()
     LogToConsole("Seed habis -> ke TAKE")
 
-    warp(worldTake)
+    warp(worldTake, false)
     Sleep(700)
 
     while inv(seedA) == 0 or inv(seedB) == 0 do
         waitPingStable()
 
         if not inWorld(worldTake) then
-            warp(worldTake)
+            warp(worldTake, false)
             Sleep(700)
         end
 
@@ -486,13 +493,12 @@ function ambilSeed()
     end
 
     LogToConsole("Seed dapat -> balik FARM")
-
-    warp(worldFarm)
+    warp(worldFarm, true)
     Sleep(1000)
 
     while not inWorld(worldFarm) do
         LogToConsole("Belum masuk FARM -> retry")
-        warp(worldFarm)
+        warp(worldFarm, true)
         Sleep(1000)
     end
 
@@ -507,13 +513,22 @@ end
 
 -- ===== SPLICE LEFTOVER =====
 function spliceLeftover()
+    if runningLeftover then
+        return false
+    end
+
+    runningLeftover = true
+
     if not inWorld(worldFarm) then
-        warp(worldFarm)
+        warp(worldFarm, false)
         Sleep(700)
     end
 
     local w = GetWorld()
-    if not w then return false end
+    if not w then
+        runningLeftover = false
+        return false
+    end
 
     LogToConsole("Mulai spliceLeftover")
     local found = false
@@ -526,14 +541,18 @@ function spliceLeftover()
                 waitPingStable()
 
                 if not inWorld(worldFarm) then
-                    warp(worldFarm)
+                    warp(worldFarm, false)
                     Sleep(700)
                     w = GetWorld()
-                    if not w then return found end
+                    if not w then
+                        runningLeftover = false
+                        return found
+                    end
                 end
 
-                local t = GetTile(x, y)
+                cekSeedSmart()
 
+                local t = GetTile(x, y)
                 if t then
                     local need =
                         canPlant(x, y) or
@@ -541,21 +560,9 @@ function spliceLeftover()
                         t.fg == seedB
 
                     if need then
-                        cekSeedSmart()
-
-                        local t2 = GetTile(x, y)
-                        if t2 then
-                            local need2 =
-                                canPlant(x, y) or
-                                t2.fg == seedA or
-                                t2.fg == seedB
-
-                            if need2 then
-                                if splice(x, y) then
-                                    didSomething = true
-                                    found = true
-                                end
-                            end
+                        if splice(x, y) then
+                            didSomething = true
+                            found = true
                         end
                     end
                 end
@@ -569,18 +576,11 @@ function spliceLeftover()
 
     lastLeftoverCheck = os.time() * 1000
     LogToConsole("Selesai spliceLeftover")
+    runningLeftover = false
     return found
 end
 
-function shouldRunLeftover()
-    local now = os.time() * 1000
-    if lastLeftoverCheck == 0 then
-        return true
-    end
-    return (now - lastLeftoverCheck) >= LEFTOVER_INTERVAL
-end
-
--- ===== SPLICE PER ROW =====
+-- ===== ROW SCAN =====
 function spliceRow(y)
     local w = GetWorld()
     if not w then return end
@@ -601,12 +601,11 @@ function spliceRow(y)
         end
 
         if not inWorld(worldFarm) then
-            warp(worldFarm)
-            Sleep(700)
+            warp(worldFarm, true)
+            Sleep(1000)
         end
 
         local t = GetTile(x, y)
-
         if t then
             if t.fg == seedA or t.fg == seedB then
                 splice(x, y)
@@ -621,14 +620,14 @@ end
 
 -- ===== MAIN =====
 RunThread(function()
-    warp(worldFarm)
+    warp(worldFarm, true)
     Sleep(1000)
 
     while true do
         waitPingStable()
 
         if not inWorld(worldFarm) then
-            warp(worldFarm)
+            warp(worldFarm, true)
             Sleep(1000)
         end
 
@@ -644,7 +643,7 @@ RunThread(function()
                 waitPingStable()
 
                 if not inWorld(worldFarm) then
-                    warp(worldFarm)
+                    warp(worldFarm, true)
                     Sleep(1000)
                 end
 
