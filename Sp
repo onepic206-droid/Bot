@@ -2,7 +2,7 @@
 -- ============================================
 -- LURE PACK FARMER - BATCH QUEUE SYSTEM
 -- ============================================
-local worldname = worldname(put your world)"    -- World to join
+local worldname = "tupsanlure77"    -- World to join
 local dropY =                   -- Y position for drops
 local maxX =                   -- Random X range (1 to maxX)
 local BATCH_SIZE = 5            -- Max bots per batch (avoid proxy ban and rate limit limit)
