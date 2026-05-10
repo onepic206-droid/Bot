@@ -1,0 +1,153 @@
+-- ============================================
+-- LURE PACK FARMER - BATCH QUEUE SYSTEM
+-- ============================================
+local worldname = "worldname"    -- World to join
+local dropY =                   -- Y position for drops
+local maxX =                   -- Random X range (1 to maxX)
+local BATCH_SIZE = 40            -- Max bots per batch (world limit)
+-- ============================================
+
+local PACK_ID = "LureBooster"
+local PACK_COST = 100
+local manager = getClient()
+
+function randomSleep(minMs, maxMs)
+    sleep(math.random(minMs, maxMs))
+end
+
+function processBot(bot)
+    -- Wait for bot to be in PIXELSTATION (means tutorial is over)
+    while bot:navigation() ~= "PIXELSTATION" do
+        sleep(2000)
+    end
+
+    print("[LURE] Bot {} arrived at PIXELSTATION, proceeding...", bot.id)
+    randomSleep(1000, 2000)
+
+    -- Warp to world
+    bot:warp(worldname)
+    randomSleep(3000, 5000)
+
+    local attempts = 0
+    while bot:navigation() ~= worldname and attempts < 30 do
+        sleep(1000)
+        attempts = attempts + 1
+    end
+
+    if bot:navigation() ~= worldname then
+        print("[LURE] Bot failed to enter {}", worldname)
+        return
+    end
+
+    randomSleep(500, 1500)
+
+    -- Buy loop: keep buying while gems >= 100
+    local buyCount = 0
+    while bot.gems >= PACK_COST do
+        local currentGems = bot.gems
+        bot:buy(PACK_ID)
+
+        -- Wait for gem count to decrease
+        local waitCount = 0
+        while bot.gems >= currentGems and waitCount < 30 do
+            sleep(500)
+            waitCount = waitCount + 1
+        end
+
+        if bot.gems >= currentGems then 
+            print("[LURE] ERROR: Pack purchase timed out or failed for bot {}", bot.id)
+            break 
+        end
+
+        buyCount = buyCount + 1
+        randomSleep(500, 1500)
+
+        -- Pathfind to random X position on dropY
+        local randX = math.random(1, maxX)
+        local pathFound = bot:findPath(Vector2i.new(randX, dropY))
+
+        if pathFound then
+            while bot:pathfinding() do
+                sleep(100)
+            end
+        end
+
+        randomSleep(300, 800)
+
+        -- Drop all consumable items (type 7 = lures/baits)
+        for _, item in pairs(bot:inventory().items) do
+            if item.type == 7 then
+                bot:drop(item.id, item.type, item.amount)
+                randomSleep(150, 400)
+            end
+        end
+
+        randomSleep(500, 1000)
+    end
+
+    print("[LURE] Bot done ({} packs bought)", buyCount)
+end
+
+-- Main batch loop
+local totalProcessed = 0
+
+while true do
+    local batchNum = math.floor(totalProcessed / BATCH_SIZE) + 1
+    print("[LURE] === Starting batch #{} ===", batchNum)
+
+    -- Snapshot existing clients before creating new ones
+    local existingIds = {}
+    for _, c in pairs(getClients()) do
+        existingIds[c.id] = true
+    end
+
+    -- Create batch of new clients
+    for i = 1, BATCH_SIZE do
+        addClient()
+        sleep(300)
+    end
+
+    sleep(5000) -- Wait for clients to initialize
+
+    -- Find newly created clients
+    local workers = {}
+    for _, c in pairs(getClients()) do
+        local cId = c.id
+        if not existingIds[cId] then
+            table.insert(workers, c)
+        end
+    end
+
+    print("[LURE] Created {} bots, processing...", #workers)
+
+    -- Process all bots concurrently via threads
+    local completed = 0
+    for _, bot in pairs(workers) do
+        runThread(function()
+            processBot(bot)
+            completed = completed + 1
+        end)
+        sleep(100)
+    end
+
+    -- Wait for all threads to finish
+    while completed < #workers do
+        sleep(1000)
+    end
+
+    -- Disconnect and Remove all worker bots
+    for _, bot in pairs(workers) do
+        bot:disconnect()
+        sleep(200)
+        removeClient(bot.id)
+        sleep(200)
+    end
+
+    totalProcessed = totalProcessed + #workers
+    print("[LURE] Batch #{} complete! Total processed: {}", batchNum, totalProcessed)
+
+    -- Random wait between batches
+    local waitSec = math.random(15, 45)
+    print("[LURE] Waiting {}s before next batch...", waitSec)
+    sleep(waitSec * 1000)
+end
